@@ -6,7 +6,9 @@ export type TransferParams = {
   sourceChain: SupportedChain | number;
   /** Destination chain identifier */
   destinationChain: SupportedChain | number;
-  /** Amount in USDC base units (6 decimals). Use parseUnits("10", 6) for $10 */
+  /** Amount in USDC base units. Most chains use 6 decimals — use parseUnits("10", 6) for $10.
+   *  Arc is the exception: USDC is the native gas token with 18 decimals — use parseUnits("10", 18).
+   *  Check ChainConfig.usdcDecimals for the correct precision per chain. */
   amount: bigint;
   /** Recipient address on destination chain. Defaults to sender if omitted. */
   recipient?: Address;

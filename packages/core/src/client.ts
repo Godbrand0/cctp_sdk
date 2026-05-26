@@ -33,9 +33,10 @@ export class CctpClient {
 
   async resume(
     transferId: string,
-    destinationWalletClient: WalletClient
+    sourceWalletClient: WalletClient,
+    destinationWalletClient?: WalletClient
   ): Promise<Transfer> {
-    const transfer = await Transfer.fromId(transferId, destinationWalletClient, this.config);
+    const transfer = await Transfer.fromId(transferId, sourceWalletClient, destinationWalletClient, this.config);
     await transfer.execute();
     return transfer;
   }

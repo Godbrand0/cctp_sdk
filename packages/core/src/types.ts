@@ -41,8 +41,10 @@ export type FeeEstimate = {
 export type ResumeParams = {
   /** The transferId returned from a previous transfer() call */
   transferId: string;
+  /** Signer for source chain (required) */
+  sourceWalletClient: WalletClient;
   /** Signer for destination chain relay tx */
-  destinationWalletClient: WalletClient;
+  destinationWalletClient?: WalletClient;
 };
 
 export type CctpClientConfig = {

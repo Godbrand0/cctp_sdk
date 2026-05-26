@@ -75,8 +75,12 @@ export class Transfer extends EventEmitter<{
         await this.relay();
       }
     } catch (err) {
-      if (this.snapshot.state !== TransferState.COMPLETE) {
-        this.transition(TransferState.FAILED, { error: toCctpError(err) });
+      if (this.snapshot.state !== TransferState.COMPLETE && this.snapshot.state !== TransferState.FAILED) {
+        try {
+          this.transition(TransferState.FAILED, { error: toCctpError(err) });
+        } catch {
+          // swallow — original error is what matters
+        }
       }
       throw err;
     }
@@ -103,7 +107,7 @@ export class Transfer extends EventEmitter<{
   }
 
   private async approve(): Promise<void> {
-    const sourceChain = getChain(this.params.sourceChain);
+    const sourceChain = getChain(this.params.from, this.config.env);
     const publicClient = this.getPublicClient(sourceChain.chainId);
 
     const allowance = await publicClient.readContract({
@@ -135,13 +139,33 @@ export class Transfer extends EventEmitter<{
 
   private async burn(): Promise<void> {
     this.transition(TransferState.BURNING);
-    const sourceChain = getChain(this.params.sourceChain);
-    const destChain = getChain(this.params.destinationChain);
+    const sourceChain = getChain(this.params.from, this.config.env);
+    const destChain = getChain(this.params.to, this.config.env);
     const publicClient = this.getPublicClient(sourceChain.chainId);
 
     const recipient = this.params.recipient ?? this.sourceWallet.account!.address;
     const recipientBytes32 = addressToBytes32(recipient);
-    const maxFee = this.params.maxFee ?? (this.params.fast || this.params.hook ? (this.params.amount * 10n) / 10000n : 0n);
+
+    let maxFee = this.params.maxFee ?? 0n;
+    if (!this.params.maxFee && (this.params.fast || this.params.hook)) {
+      const minimumFee = await this.attestationClient.getMinimumFee(
+        sourceChain.domain,
+        destChain.domain
+      );
+      if (minimumFee > this.params.amount) {
+        throw new CctpError(
+          `Fast transfer fee (${minimumFee} base units) exceeds transfer amount (${this.params.amount} base units). Use a larger amount or set fast: false.`,
+          "FEE_EXCEEDS_AMOUNT"
+        );
+      }
+      maxFee = minimumFee;
+    }
+
+    // CCTP v2: 7-arg depositForBurn
+    // destinationCaller=bytes32(0) → any relayer can relay
+    // minFinalityThreshold: 1000 = fast lane, 0 = standard
+    const destinationCaller = "0x0000000000000000000000000000000000000000000000000000000000000000" as `0x${string}`;
+    const minFinalityThreshold = this.params.fast ? 1000 : 0;
 
     let hash: Hash;
 
@@ -155,13 +179,16 @@ export class Transfer extends EventEmitter<{
           destChain.domain,
           recipientBytes32,
           sourceChain.usdc,
+          destinationCaller,
           maxFee,
+          minFinalityThreshold,
           encodeHook(this.params.hook),
         ],
         account: this.sourceWallet.account!,
         chain: this.sourceWallet.chain,
+        gas: BigInt(500000),
       });
-    } else if (this.params.fast) {
+    } else {
       hash = await this.sourceWallet.writeContract({
         address: sourceChain.tokenMessenger,
         abi: TOKEN_MESSENGER_ABI,
@@ -171,19 +198,13 @@ export class Transfer extends EventEmitter<{
           destChain.domain,
           recipientBytes32,
           sourceChain.usdc,
+          destinationCaller,
           maxFee,
+          minFinalityThreshold,
         ],
         account: this.sourceWallet.account!,
         chain: this.sourceWallet.chain,
-      });
-    } else {
-      hash = await this.sourceWallet.writeContract({
-        address: sourceChain.tokenMessenger,
-        abi: TOKEN_MESSENGER_ABI,
-        functionName: "depositForBurn",
-        args: [this.params.amount, destChain.domain, recipientBytes32, sourceChain.usdc],
-        account: this.sourceWallet.account!,
-        chain: this.sourceWallet.chain,
+        gas: BigInt(500000),
       });
     }
 
@@ -201,22 +222,28 @@ export class Transfer extends EventEmitter<{
 
   private async waitForAttestation(): Promise<void> {
     this.transition(TransferState.AWAITING_ATTESTATION);
-    const messageHash = keccak256(this.snapshot.messageBytes!);
+    const sourceChain = getChain(this.params.from, this.config.env);
 
-    const attestation = await this.attestationClient.poll(messageHash, {
-      maxAttempts: this.config.maxAttestationAttempts,
-      intervalMs: this.config.pollIntervalMs,
-      onAttempt: () => {
-        this.emit("stateChange", { ...this.snapshot, updatedAt: Date.now() });
-      },
-    });
+    const result = await this.attestationClient.poll(
+      this.snapshot.sourceTxHash!,
+      sourceChain.domain,
+      {
+        maxAttempts: this.config.maxAttestationAttempts,
+        intervalMs: this.config.pollIntervalMs,
+        onAttempt: () => {
+          this.emit("stateChange", { ...this.snapshot, updatedAt: Date.now() });
+        },
+      }
+    );
 
-    this.transition(TransferState.ATTESTED, { attestation });
+    // Use message bytes from Iris if provided — raw event log bytes have a zero nonce in CCTP v2
+    const messageBytes = result.messageBytes ?? this.snapshot.messageBytes!;
+    this.transition(TransferState.ATTESTED, { attestation: result.attestation, messageBytes });
   }
 
   private async relay(): Promise<void> {
     this.transition(TransferState.RELAYING);
-    const destChain = getChain(this.params.destinationChain);
+    const destChain = getChain(this.params.to, this.config.env);
     const wallet = this.destinationWallet ?? this.sourceWallet;
     const publicClient = this.getPublicClient(destChain.chainId);
 
@@ -244,7 +271,7 @@ export class Transfer extends EventEmitter<{
   }
 
   private getPublicClient(chainId: number): PublicClient {
-    return getOrCreatePublicClient(chainId, this.config.rpcs) as any as PublicClient;
+    return getOrCreatePublicClient(chainId, this.config.rpcs, this.config.env) as any as PublicClient;
   }
 
   private extractMessageBytes(receipt: any, _messageTransmitter: string): `0x${string}` {
@@ -356,8 +383,8 @@ export class Transfer extends EventEmitter<{
     }
 
     // Fallback: Recover from the blockchain receipt
-    const sourceChainConfig = getChain(sourceChain);
-    const publicClient = getOrCreatePublicClient(sourceChainConfig.chainId, config.rpcs) as any as PublicClient;
+    const sourceChainConfig = getChain(sourceChain, config.env);
+    const publicClient = getOrCreatePublicClient(sourceChainConfig.chainId, config.rpcs, config.env) as any as PublicClient;
     const receipt = await publicClient.getTransactionReceipt({ hash: txHash });
 
     const parsedLogs = parseEventLogs({

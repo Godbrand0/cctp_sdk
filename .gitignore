@@ -6,4 +6,5 @@ build_output.txt
 core_build.log
 test_output.log
 .env
-.env.*
+.env.local
+.env.*.local

@@ -2,10 +2,10 @@ import type { WalletClient, Address } from "viem";
 import type { SupportedChain } from "./chains";
 
 export type TransferParams = {
-  /** Source chain identifier — chainId number or name string */
-  sourceChain: SupportedChain | number;
-  /** Destination chain identifier */
-  destinationChain: SupportedChain | number;
+  /** Source chain name */
+  from: SupportedChain;
+  /** Destination chain name */
+  to: SupportedChain;
   /** Amount in USDC base units. Most chains use 6 decimals — use parseUnits("10", 6) for $10.
    *  Arc is the exception: USDC is the native gas token with 18 decimals — use parseUnits("10", 18).
    *  Check ChainConfig.usdcDecimals for the correct precision per chain. */
@@ -43,15 +43,17 @@ export type FeeEstimate = {
 export type ResumeParams = {
   /** The transferId returned from a previous transfer() call */
   transferId: string;
-  /** Signer for source chain (required) */
-  sourceWalletClient: WalletClient;
-  /** Signer for destination chain relay tx */
+  /** Signer for source chain */
+  walletClient: WalletClient;
+  /** Signer for destination chain relay tx (can be the same wallet) */
   destinationWalletClient?: WalletClient;
 };
 
 export type CctpClientConfig = {
-  /** Environment — affects attestation API URL and contract addresses */
+  /** Environment — "mainnet" or "testnet". Defaults to "mainnet". */
   env?: "mainnet" | "testnet";
+  /** Allowlist of chains this client can transfer between. If omitted, all chains are permitted. */
+  chains?: SupportedChain[];
   /** Override Circle's attestation API base URL */
   attestationApiUrl?: string;
   /** Max polling attempts before failing */

@@ -27,16 +27,16 @@ export type TransferStateSnapshot = {
 
 // Valid state transitions — enforced at runtime
 export const STATE_TRANSITIONS: Record<TransferState, TransferState[]> = {
-  [TransferState.IDLE]: [TransferState.APPROVING, TransferState.APPROVED, TransferState.BURNING],
-  [TransferState.APPROVING]: [TransferState.APPROVED, TransferState.FAILED],
-  [TransferState.APPROVED]: [TransferState.BURNING],
-  [TransferState.BURNING]: [TransferState.BURNED, TransferState.FAILED],
-  [TransferState.BURNED]: [TransferState.AWAITING_ATTESTATION],
+  [TransferState.IDLE]:                 [TransferState.APPROVING, TransferState.APPROVED, TransferState.BURNING, TransferState.FAILED],
+  [TransferState.APPROVING]:            [TransferState.APPROVED, TransferState.FAILED],
+  [TransferState.APPROVED]:             [TransferState.BURNING, TransferState.FAILED],
+  [TransferState.BURNING]:              [TransferState.BURNED, TransferState.FAILED],
+  [TransferState.BURNED]:               [TransferState.AWAITING_ATTESTATION, TransferState.FAILED],
   [TransferState.AWAITING_ATTESTATION]: [TransferState.ATTESTED, TransferState.FAILED],
-  [TransferState.ATTESTED]: [TransferState.RELAYING],
-  [TransferState.RELAYING]: [TransferState.COMPLETE, TransferState.FAILED],
-  [TransferState.COMPLETE]: [],
-  [TransferState.FAILED]: [TransferState.BURNING, TransferState.RELAYING], // resumable
+  [TransferState.ATTESTED]:             [TransferState.RELAYING, TransferState.FAILED],
+  [TransferState.RELAYING]:             [TransferState.COMPLETE, TransferState.FAILED],
+  [TransferState.COMPLETE]:             [],
+  [TransferState.FAILED]:               [TransferState.BURNING, TransferState.RELAYING], // resumable
 };
 
 export function validateTransition(from: TransferState, to: TransferState) {

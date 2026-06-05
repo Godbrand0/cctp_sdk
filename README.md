@@ -5,8 +5,10 @@ A production-grade TypeScript SDK for Circle's [Cross-Chain Transfer Protocol (C
 Built on **Viem v2+** with a strict state machine so transfers are always resumable.
 
 ```bash
-npm install @cctp-sdk/core viem
+npm install @cctp-sdk/core
 ```
+
+> `viem` is a peer dependency — install it if you haven't: `npm install viem`
 
 ---
 

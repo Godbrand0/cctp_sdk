@@ -1,43 +1,35 @@
-# Arc CCTP v2 SDK
+# @cctp-sdk/core
 
-A production-grade TypeScript SDK for Circle's Cross-Chain Transfer Protocol (CCTP) v2. Reduces a 7-step manual integration to a single function call — with built-in approval, burn, attestation polling, and relay.
+A production-grade TypeScript SDK for Circle's [Cross-Chain Transfer Protocol (CCTP) v2](https://developers.circle.com/cctp). Reduces a 7-step manual integration to a single function call — with built-in USDC approval, burn, attestation polling, and relay.
 
 Built on **Viem v2+** with a strict state machine so transfers are always resumable.
 
+```bash
+npm install @cctp-sdk/core viem
+```
+
+---
+
 ## Why
 
-Manual CCTP v2 integration requires:
-1. Check and submit USDC approval
+Raw CCTP v2 requires you to:
+
+1. Check allowance and submit USDC approval
 2. Call `depositForBurn` with 7 arguments
-3. Extract `MessageSent` event from the receipt
-4. Poll Circle's attestation API until status is `complete`
-5. Use Iris-provided message bytes (raw event bytes have a zero nonce in v2)
+3. Extract the `MessageSent` event from the receipt
+4. Poll Circle's Iris attestation API until status is `complete`
+5. Use Iris-provided message bytes (raw event bytes have a zero nonce bug in v2)
 6. Submit `receiveMessage` on the destination chain
 7. Wait for confirmation
 
-This SDK does all of it in one call.
+This SDK handles all of it in one call.
 
-## Packages
+---
 
-| Package | Description |
-|---|---|
-| `@arc/cctp-sdk` | Core state machine, `CctpClient`, hook encoder, fee estimator |
-| `@arc/cctp-sdk-react` | React hooks — `useTransfer`, `useEstimateFee` |
-| `@arc/cctp-sdk-hardhat` | `MockAttestor` server for local integration testing |
-
-## Installation
-
-```bash
-pnpm install
-pnpm run build
-```
-
-## Usage
-
-### Basic transfer
+## Quick start
 
 ```typescript
-import { CctpClient } from "@arc/cctp-sdk";
+import { CctpClient } from "@cctp-sdk/core";
 import { createWalletClient, http, parseUnits } from "viem";
 import { mainnet } from "viem/chains";
 
@@ -45,7 +37,7 @@ const client = new CctpClient({ env: "mainnet" });
 
 const wallet = createWalletClient({
   chain: mainnet,
-  transport: http(),
+  transport: http("https://your-rpc-url"),
 });
 
 const transfer = await client.transfer(
@@ -53,36 +45,108 @@ const transfer = await client.transfer(
     from: "ethereum",
     to: "base",
     amount: parseUnits("10", 6), // 10 USDC
-    fast: true,
+    fast: true,                  // CCTP v2 fast lane (~2s attestation)
   },
   wallet
 );
 
+// Listen to every state transition
 transfer.on("stateChange", (snap) => {
-  console.log(snap.state, snap.sourceTxHash ?? "");
+  console.log(snap.state);
+  if (snap.sourceTxHash) console.log("Burn tx:", snap.sourceTxHash);
+  if (snap.destinationTxHash) console.log("Relay tx:", snap.destinationTxHash);
 });
 
 const result = await transfer.wait();
-console.log("Complete:", result.destinationTxHash);
+console.log("Done:", result.destinationTxHash);
 ```
 
-### With a chain allowlist
+---
 
-Declare which chains your app supports. The client throws if `from`/`to` isn't in the list.
+## Configuration
 
 ```typescript
 const client = new CctpClient({
+  // "mainnet" (default) or "testnet"
   env: "testnet",
+
+  // Optional: restrict which chains this client can use
   chains: ["base", "arbitrum", "ethereum"],
+
+  // Optional: override Circle's attestation API URL
+  attestationApiUrl: "https://iris-api-sandbox.circle.com",
+
+  // Optional: per-chain RPC overrides (keyed by chain name)
+  rpcs: {
+    base: "https://mainnet.base.org",
+    ethereum: "https://eth.llamarpc.com",
+  },
+
+  // Optional: max attestation poll attempts (default: 60)
+  maxAttestationAttempts: 60,
+
+  // Optional: poll interval in ms — 0 uses exponential backoff (default)
+  pollIntervalMs: 0,
 });
 ```
 
-### With a destination hook
+---
 
-Execute a contract call on the destination chain at mint time — useful for auto-depositing into vaults or swapping.
+## Transfer params
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `from` | `SupportedChain` | Yes | Source chain name (e.g. `"base"`) |
+| `to` | `SupportedChain` | Yes | Destination chain name (e.g. `"arbitrum"`) |
+| `amount` | `bigint` | Yes | Amount in USDC base units (`parseUnits("10", 6)` = 10 USDC) |
+| `fast` | `boolean` | No | Use CCTP v2 fast lane. Fetches minimum fee from Iris automatically. |
+| `recipient` | `Address` | No | Override recipient on destination. Defaults to sender. |
+| `maxFee` | `bigint` | No | Override fast lane fee. Auto-fetched from Iris if omitted. |
+| `hook` | `TransferHook` | No | Execute a contract call at mint time on the destination chain. |
+
+---
+
+## Transfer states
+
+```
+IDLE → APPROVING → APPROVED → BURNING → BURNED → AWAITING_ATTESTATION → ATTESTED → RELAYING → COMPLETE
+                                                                                          ↘ FAILED
+```
+
+Every state transition emits a `stateChange` event with a `TransferStateSnapshot`:
 
 ```typescript
-import { Hooks } from "@arc/cctp-sdk";
+type TransferStateSnapshot = {
+  state: TransferState;
+  transferId: string;
+  sourceTxHash?: `0x${string}`;
+  destinationTxHash?: `0x${string}`;
+  messageBytes?: `0x${string}`;
+  attestation?: `0x${string}`;
+  error?: CctpError;
+  updatedAt: number;
+};
+```
+
+---
+
+## Resume an interrupted transfer
+
+Transfer state is persisted to `localStorage` (browser) or `/tmp` (Node.js). If the user closes the tab mid-transfer, resume with the `transferId`:
+
+```typescript
+const transfer = await client.resume(transferId, wallet);
+const result = await transfer.wait();
+```
+
+---
+
+## Destination hooks
+
+Execute arbitrary contract logic on the destination chain at mint time — swap, deposit into a vault, pay a contract, etc.
+
+```typescript
+import { CctpClient, encodeHook } from "@cctp-sdk/core";
 
 const transfer = await client.transfer(
   {
@@ -90,110 +154,94 @@ const transfer = await client.transfer(
     to: "arbitrum",
     amount: parseUnits("50", 6),
     fast: true,
-    hook: Hooks.depositToVault({ vaultAddress: "0x..." }),
+    hook: {
+      target: "0xYourContract",
+      calldata: "0x...",
+      forwardAmount: parseUnits("50", 6),
+    },
   },
   wallet
 );
 ```
 
-### Resume an interrupted transfer
+---
+
+## Check status from a tx hash
+
+Recover transfer status from a burn transaction hash without a `transferId`:
 
 ```typescript
-const transfer = await client.resume(transferId, wallet);
-const result = await transfer.wait();
+const snapshot = await client.getStatus(
+  "0xYourBurnTxHash",
+  "base"  // source chain
+);
+console.log(snapshot.state); // "ATTESTED" | "AWAITING_ATTESTATION" | etc.
 ```
 
-### React
+---
 
-```tsx
-import { useTransfer } from "@arc/cctp-sdk-react";
-import { useWalletClient } from "wagmi";
+## Fee estimation
 
-export function BridgeButton() {
-  const { data: wallet } = useWalletClient();
-  const { transfer, state, isLoading, error } = useTransfer();
+```typescript
+const fee = await client.estimateFee({
+  from: "ethereum",
+  to: "base",
+  amount: parseUnits("100", 6),
+  fast: true,
+});
 
-  return (
-    <button
-      disabled={isLoading}
-      onClick={() =>
-        transfer({ from: "ethereum", to: "base", amount: parseUnits("10", 6), fast: true }, wallet!)
-      }
-    >
-      {isLoading ? `${state}…` : "Bridge 10 USDC"}
-    </button>
-  );
-}
+console.log("Gas (wei):", fee.gasCostWei.toString());
+console.log("Bridge fee (USDC):", fee.bridgeFeeUsdc.toString());
+console.log("Est. time:", fee.estimatedSeconds, "seconds");
 ```
+
+---
 
 ## Supported chains
 
 ### Mainnet
 
-| Chain | Chain ID | CCTP Domain |
-|---|---|---|
-| Ethereum | 1 | 0 |
-| Avalanche | 43114 | 1 |
-| Optimism | 10 | 2 |
-| Arbitrum | 42161 | 3 |
-| Base | 8453 | 6 |
-| Polygon | 137 | 7 |
-| Unichain | 130 | 10 |
-| Linea | 59144 | 11 |
-| Sonic | 146 | 13 |
-| World Chain | 480 | 14 |
+| Key | Chain | Chain ID | CCTP Domain |
+|---|---|---|---|
+| `ethereum` | Ethereum | 1 | 0 |
+| `avalanche` | Avalanche | 43114 | 1 |
+| `optimism` | Optimism | 10 | 2 |
+| `arbitrum` | Arbitrum | 42161 | 3 |
+| `base` | Base | 8453 | 6 |
+| `polygon` | Polygon | 137 | 7 |
+| `unichain` | Unichain | 130 | 10 |
+| `linea` | Linea | 59144 | 11 |
+| `sonic` | Sonic | 146 | 13 |
+| `worldchain` | World Chain | 480 | 14 |
 
 ### Testnet
 
-| Chain | Chain ID | CCTP Domain |
-|---|---|---|
-| Ethereum Sepolia | 11155111 | 0 |
-| Avalanche Fuji | 43113 | 1 |
-| OP Sepolia | 11155420 | 2 |
-| Arbitrum Sepolia | 421614 | 3 |
-| Base Sepolia | 84532 | 6 |
-| Polygon Amoy | 80002 | 7 |
-| Unichain Sepolia | 1301 | 10 |
-| Linea Sepolia | 59141 | 11 |
-| Sonic Testnet | 57054 | 13 |
-| World Chain Sepolia | 4801 | 14 |
-| Monad Testnet | 10143 | 15 |
-| Arc Testnet | 5042002 | 26 |
+| Key | Chain | Chain ID | CCTP Domain |
+|---|---|---|---|
+| `ethereum` | Ethereum Sepolia | 11155111 | 0 |
+| `avalanche` | Avalanche Fuji | 43113 | 1 |
+| `optimism` | OP Sepolia | 11155420 | 2 |
+| `arbitrum` | Arbitrum Sepolia | 421614 | 3 |
+| `base` | Base Sepolia | 84532 | 6 |
+| `polygon` | Polygon Amoy | 80002 | 7 |
+| `unichain` | Unichain Sepolia | 1301 | 10 |
+| `linea` | Linea Sepolia | 59141 | 11 |
+| `sonic` | Sonic Testnet | 57054 | 13 |
+| `worldchain` | World Chain Sepolia | 4801 | 14 |
+| `monad` | Monad Testnet | 10143 | 15 |
+| `arc` | Arc Testnet | 5042002 | 26 |
 
-## Transfer states
-
-```
-IDLE → APPROVING → APPROVED → BURNING → BURNED → AWAITING_ATTESTATION → ATTESTED → RELAYING → COMPLETE
-                                                                                              ↘ FAILED (from any state)
-```
-
-## Running the testnet example
-
-```bash
-cp .env.example .env   # add your private key
-pnpm example:transfer
-```
-
-Transfers 3 USDC from Base Sepolia to Arc testnet using the fast lane (~30 seconds).
-
-## Local testing
-
-```typescript
-import { startMockAttestor } from "@arc/cctp-sdk-hardhat";
-
-let stop: () => void;
-beforeAll(async () => { stop = await startMockAttestor(3001); });
-afterAll(() => stop());
-
-const client = new CctpClient({
-  env: "testnet",
-  attestationApiUrl: "http://localhost:3001",
-});
-```
+---
 
 ## Notes
 
-- **USDC decimals**: 6 on all chains except Arc testnet (18 — USDC is the native gas token). Check `ChainConfig.usdcDecimals` or use `TESTNET_CHAINS.arc.usdcDecimals`.
-- **Fast lane fee**: Circle charges a minimum fee (~1.3 USDC) for fast transfers. The SDK fetches the current minimum automatically from the Iris API — set `fast: true` and it handles the rest.
-- **Message bytes**: CCTP v2 raw event logs encode the nonce as zero. The SDK uses Iris-provided message bytes for the relay call.
-- **Resumability**: Transfer state is persisted to `localStorage` (browser) or `/tmp` (Node). Use `client.resume(transferId, wallet)` to continue an interrupted transfer.
+- **USDC decimals**: 6 on all chains except Arc testnet (18 — USDC is the native gas token). Always check `ChainConfig.usdcDecimals` or use `TESTNET_CHAINS.arc.usdcDecimals`.
+- **Fast lane fee**: Circle charges a minimum fee (~1.3 USDC on testnet) for fast transfers. Set `fast: true` and the SDK fetches the current minimum from Iris automatically.
+- **Message bytes**: CCTP v2 raw event logs encode the nonce as zero. The SDK uses Iris-provided message bytes for the relay call to avoid this.
+- **Two wallets**: Pass a second wallet client to `transfer()` if your source and destination signers are different (e.g. different chains on a hardware wallet).
+
+---
+
+## License
+
+MIT

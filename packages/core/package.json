@@ -1,16 +1,28 @@
 {
   "name": "@arc/cctp-sdk",
   "version": "0.1.0",
-  "description": "Production-grade CCTP v2 transfer lifecycle SDK",
-  "main": "dist/index.cjs",
-  "module": "dist/index.js",
+  "description": "Production-grade CCTP v2 SDK — cross-chain USDC transfers in one function call",
+  "keywords": ["cctp", "circle", "usdc", "cross-chain", "bridge", "viem", "ethereum", "arc"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Godbrand0/cctp_sdk.git"
+  },
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
     }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts",

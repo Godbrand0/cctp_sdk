@@ -1,11 +1,12 @@
 import EventEmitter from "eventemitter3";
 import { type WalletClient, type PublicClient, type Hash, keccak256, parseEventLogs } from "viem";
 import { TransferState, type TransferStateSnapshot, validateTransition } from "./state";
-import { CctpError } from "./errors";
+import { CctpError, HookExecutorRequiredError } from "./errors";
 import { AttestationClient } from "./attestation";
 import { getChain } from "./chains";
 import { TOKEN_MESSENGER_ABI } from "./abis/TokenMessenger";
 import { MESSAGE_TRANSMITTER_ABI } from "./abis/MessageTransmitter";
+import { HOOK_EXECUTOR_ABI } from "./abis/HookExecutor";
 import { USDC_ABI } from "./abis/USDC";
 import { encodeHook } from "./hooks";
 import { getOrCreatePublicClient } from "./utils/fee";
@@ -143,8 +144,12 @@ export class Transfer extends EventEmitter<{
     const destChain = getChain(this.params.to, this.config.env);
     const publicClient = this.getPublicClient(sourceChain.chainId);
 
+    // With a hook, USDC must mint to the executor contract — it transiently
+    // holds the funds while executing the hook. Without one, mint straight to
+    // the recipient.
+    const hookExecutor = this.resolveHookExecutor();
     const recipient = this.params.recipient ?? this.sourceWallet.account!.address;
-    const recipientBytes32 = addressToBytes32(recipient);
+    const recipientBytes32 = addressToBytes32(hookExecutor ?? recipient);
 
     let maxFee = this.params.maxFee ?? 0n;
     if (!this.params.maxFee && (this.params.fast || this.params.hook)) {
@@ -162,9 +167,14 @@ export class Transfer extends EventEmitter<{
     }
 
     // CCTP v2: 7-arg depositForBurn
-    // destinationCaller=bytes32(0) → any relayer can relay
+    // Without a hook, destinationCaller=bytes32(0) → any relayer can relay.
+    // With a hook, lock relaying to the executor: otherwise anyone could call
+    // receiveMessage directly, minting USDC to the executor with the hook never
+    // executed — consuming the nonce and stranding the funds.
     // minFinalityThreshold: 1000 = fast lane, 0 = standard
-    const destinationCaller = "0x0000000000000000000000000000000000000000000000000000000000000000" as `0x${string}`;
+    const destinationCaller = hookExecutor
+      ? addressToBytes32(hookExecutor)
+      : ("0x0000000000000000000000000000000000000000000000000000000000000000" as `0x${string}`);
     const minFinalityThreshold = this.params.fast ? 1000 : 0;
 
     let hash: Hash;
@@ -246,18 +256,45 @@ export class Transfer extends EventEmitter<{
     const destChain = getChain(this.params.to, this.config.env);
     const wallet = this.destinationWallet ?? this.sourceWallet;
     const publicClient = this.getPublicClient(destChain.chainId);
+    const hookExecutor = this.resolveHookExecutor();
 
-    const hash = await wallet.writeContract({
-      address: destChain.messageTransmitter,
-      abi: MESSAGE_TRANSMITTER_ABI,
-      functionName: "receiveMessage",
-      args: [this.snapshot.messageBytes!, this.snapshot.attestation!],
-      account: wallet.account!,
-      chain: wallet.chain,
-    });
+    let hash: Hash;
+
+    if (hookExecutor) {
+      // CCTP V2 never executes hookData — the executor contract calls
+      // receiveMessage itself, then decodes and runs the hook from the
+      // attested message in the same transaction.
+      hash = await wallet.writeContract({
+        address: hookExecutor,
+        abi: HOOK_EXECUTOR_ABI,
+        functionName: "relayAndExecute",
+        args: [this.snapshot.messageBytes!, this.snapshot.attestation!],
+        account: wallet.account!,
+        chain: wallet.chain,
+      });
+    } else {
+      hash = await wallet.writeContract({
+        address: destChain.messageTransmitter,
+        abi: MESSAGE_TRANSMITTER_ABI,
+        functionName: "receiveMessage",
+        args: [this.snapshot.messageBytes!, this.snapshot.attestation!],
+        account: wallet.account!,
+        chain: wallet.chain,
+      });
+    }
 
     await publicClient.waitForTransactionReceipt({ hash });
     this.transition(TransferState.COMPLETE, { destinationTxHash: hash });
+  }
+
+  /** Executor contract that relays + runs the hook on the destination chain.
+   *  Returns undefined for hookless transfers; throws if a hook is present but
+   *  no executor is configured — otherwise the hook would silently never fire. */
+  private resolveHookExecutor(): `0x${string}` | undefined {
+    if (!this.params.hook) return undefined;
+    const executor = this.params.hookExecutor ?? this.config.hookExecutors?.[this.params.to];
+    if (!executor) throw new HookExecutorRequiredError(this.params.to);
+    return executor;
   }
 
   private transition(state: TransferState, update: Partial<TransferStateSnapshot> = {}): void {

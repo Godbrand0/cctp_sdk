@@ -65,14 +65,17 @@ describe("Transfer state machine", () => {
       writeContract: vi.fn().mockResolvedValue("0xdestasthash"),
     };
 
-    vi.spyOn(AttestationClient.prototype, "poll").mockResolvedValue("0xsignature");
+    vi.spyOn(AttestationClient.prototype, "poll").mockResolvedValue({
+      attestation: "0xsignature",
+      messageBytes: "0xbytes",
+    } as any);
     vi.spyOn(AttestationClient.prototype, "getAttestation").mockResolvedValue({ status: "complete", attestation: "0xsignature" });
   });
 
   it("should successfully execute a full transfer lifecycle (burn and relay)", async () => {
     const params = {
-      sourceChain: "ethereum" as const,
-      destinationChain: "arbitrum" as const,
+      from: "ethereum" as const,
+      to: "arbitrum" as const,
       amount: 1000000n, // $1
     };
 
@@ -109,8 +112,8 @@ describe("Transfer state machine", () => {
     mockPublicClient.readContract = vi.fn().mockResolvedValue(100000000n); // allowance > amount
 
     const params = {
-      sourceChain: "base" as const,
-      destinationChain: "arbitrum" as const,
+      from: "base" as const,
+      to: "arbitrum" as const,
       amount: 1000000n,
     };
 
@@ -141,8 +144,8 @@ describe("Transfer state machine", () => {
     mockSourceWallet.writeContract = vi.fn().mockRejectedValue(new Error("User rejected"));
 
     const params = {
-      sourceChain: "optimism" as const,
-      destinationChain: "arbitrum" as const,
+      from: "optimism" as const,
+      to: "arbitrum" as const,
       amount: 1000000n,
     };
 
@@ -162,8 +165,8 @@ describe("Transfer state machine", () => {
 
   it("should support persistence and fromId resumability", async () => {
     const params = {
-      sourceChain: "polygon" as const,
-      destinationChain: "avalanche" as const,
+      from: "polygon" as const,
+      to: "avalanche" as const,
       amount: 5000000n,
     };
 
@@ -182,6 +185,82 @@ describe("Transfer state machine", () => {
     const resumed = await Transfer.fromId(transferId, mockSourceWallet, mockDestWallet, config as any);
     expect(resumed.transferId).toBe(transferId);
     expect(resumed.state).toBe(TransferState.IDLE);
+  });
+
+  it("should burn with the executor as mintRecipient + destinationCaller and relay through it when a hook is present", async () => {
+    const executor = ("0x" + "ab".repeat(20)) as `0x${string}`;
+    const executorBytes32 = ("0x" + "0".repeat(24) + "ab".repeat(20)) as `0x${string}`;
+
+    const params = {
+      from: "base" as const,
+      to: "arbitrum" as const,
+      amount: 10000000n, // $10
+      hook: {
+        target: ("0x" + "cd".repeat(20)) as `0x${string}`,
+        calldata: "0x1234" as `0x${string}`,
+      },
+      hookExecutor: executor,
+      maxFee: 100n,
+    };
+
+    const config = {
+      env: "testnet" as const,
+      attestationApiUrl: "http://mock",
+      maxAttestationAttempts: 10,
+      pollIntervalMs: 10,
+      rpcs: {},
+      hookExecutors: {},
+    };
+
+    const transfer = new Transfer(params, mockSourceWallet, mockDestWallet, config as any);
+    await transfer.execute();
+
+    // Burn: depositForBurnWithHook with executor as mintRecipient AND destinationCaller
+    const burnCall = mockSourceWallet.writeContract.mock.calls
+      .map((c: any[]) => c[0])
+      .find((c: any) => c.functionName === "depositForBurnWithHook");
+    expect(burnCall).toBeDefined();
+    expect(burnCall.args[2]).toBe(executorBytes32); // mintRecipient
+    expect(burnCall.args[4]).toBe(executorBytes32); // destinationCaller
+
+    // Relay: relayAndExecute on the executor, not receiveMessage on the transmitter
+    const relayCall = mockDestWallet.writeContract.mock.calls
+      .map((c: any[]) => c[0])
+      .find((c: any) => c.functionName === "relayAndExecute");
+    expect(relayCall).toBeDefined();
+    expect(relayCall.address).toBe(executor);
+    expect(mockDestWallet.writeContract.mock.calls
+      .map((c: any[]) => c[0])
+      .find((c: any) => c.functionName === "receiveMessage")).toBeUndefined();
+
+    expect(transfer.state).toBe(TransferState.COMPLETE);
+  });
+
+  it("should fail with HOOK_EXECUTOR_REQUIRED when a hook is set without an executor", async () => {
+    const params = {
+      from: "base" as const,
+      to: "arbitrum" as const,
+      amount: 10000000n,
+      hook: {
+        target: ("0x" + "cd".repeat(20)) as `0x${string}`,
+        calldata: "0x1234" as `0x${string}`,
+      },
+      maxFee: 100n,
+    };
+
+    const config = {
+      env: "testnet" as const,
+      attestationApiUrl: "http://mock",
+      maxAttestationAttempts: 10,
+      pollIntervalMs: 10,
+      rpcs: {},
+      hookExecutors: {},
+    };
+
+    const transfer = new Transfer(params, mockSourceWallet, mockDestWallet, config as any);
+
+    await expect(transfer.execute()).rejects.toMatchObject({ code: "HOOK_EXECUTOR_REQUIRED" });
+    expect(transfer.state).toBe(TransferState.FAILED);
   });
 
   it("should recover transfer status from transaction hash", async () => {

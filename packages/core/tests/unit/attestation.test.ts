@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AttestationClient } from "../../src/attestation";
-import { AttestationApiError, AttestationTimeoutError } from "../../src/errors";
+import { AttestationTimeoutError } from "../../src/errors";
 
 describe("AttestationClient", () => {
   beforeEach(() => {
@@ -20,7 +20,7 @@ describe("AttestationClient", () => {
     expect(global.fetch).toHaveBeenCalledWith("https://attestation.mock.circle.com/v1/attestations/0xhash");
   });
 
-  it("should throw an AttestationApiError on non-200 responses", async () => {
+  it("should report pending on non-200 responses", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
@@ -28,12 +28,15 @@ describe("AttestationClient", () => {
     });
 
     const client = new AttestationClient("https://attestation.mock.circle.com");
-    await expect(client.getAttestation("0xhash")).rejects.toThrow(AttestationApiError);
+    const res = await client.getAttestation("0xhash");
+    expect(res).toEqual({ status: "pending" });
   });
 
-  it("should poll with success on the second attempt", async () => {
-    const mockPending = { status: "pending_confirmations", attestation: null };
-    const mockComplete = { status: "complete", attestation: "0xsignature" };
+  it("should poll the v2 messages endpoint and succeed on the second attempt", async () => {
+    const mockPending = { messages: [{ status: "pending_confirmations", attestation: "PENDING" }] };
+    const mockComplete = {
+      messages: [{ status: "complete", attestation: "0xsignature", message: "0xmessagebytes" }],
+    };
 
     let fetchCount = 0;
     global.fetch = vi.fn().mockImplementation(() => {
@@ -47,19 +50,23 @@ describe("AttestationClient", () => {
     const client = new AttestationClient("https://attestation.mock.circle.com");
     const onAttempt = vi.fn();
 
-    const signature = await client.poll("0xhash", {
+    const result = await client.poll("0xburnhash", 6, {
       maxAttempts: 3,
       intervalMs: 1, // fast testing
       onAttempt,
     });
 
-    expect(signature).toBe("0xsignature");
+    expect(result.attestation).toBe("0xsignature");
+    expect(result.messageBytes).toBe("0xmessagebytes");
     expect(fetchCount).toBe(2);
     expect(onAttempt).toHaveBeenCalledTimes(2);
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://attestation.mock.circle.com/v2/messages/6?transactionHash=0xburnhash"
+    );
   });
 
   it("should throw timeout after reaching max attempts", async () => {
-    const mockPending = { status: "pending_confirmations", attestation: null };
+    const mockPending = { messages: [{ status: "pending_confirmations", attestation: "PENDING" }] };
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(mockPending),
@@ -67,7 +74,7 @@ describe("AttestationClient", () => {
 
     const client = new AttestationClient("https://attestation.mock.circle.com");
     await expect(
-      client.poll("0xhash", {
+      client.poll("0xburnhash", 6, {
         maxAttempts: 2,
         intervalMs: 1,
       })

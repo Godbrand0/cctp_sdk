@@ -10,3 +10,4 @@ export * from "./utils/fee";
 export { TOKEN_MESSENGER_ABI } from "./abis/TokenMessenger";
 export { MESSAGE_TRANSMITTER_ABI } from "./abis/MessageTransmitter";
 export { USDC_ABI } from "./abis/USDC";
+export { HOOK_EXECUTOR_ABI } from "./abis/HookExecutor";

@@ -16,6 +16,11 @@ export type TransferParams = {
   fast?: boolean;
   /** Optional hook to execute on destination chain at mint time */
   hook?: TransferHook;
+  /** Hook executor contract on the destination chain. CCTP V2 does not execute
+   *  hookData itself — a deployed executor (e.g. Conduit's ReceiveAndSwap) must
+   *  relay the message and run the hook. Overrides CctpClientConfig.hookExecutors.
+   *  Required (here or in config) whenever `hook` is set. */
+  hookExecutor?: Address;
   /** Max fee in USDC base units for fast lane. Required if fast === true. */
   maxFee?: bigint;
 };
@@ -62,4 +67,9 @@ export type CctpClientConfig = {
   pollIntervalMs?: number;
   /** Custom per-chain RPC overrides */
   rpcs?: Partial<Record<SupportedChain, string>>;
+  /** Per-chain hook executor contracts. When a transfer includes a hook, the
+   *  relay step calls `relayAndExecute(message, attestation)` on the destination
+   *  chain's executor instead of MessageTransmitter.receiveMessage, and the burn
+   *  sets the executor as both mintRecipient and destinationCaller. */
+  hookExecutors?: Partial<Record<SupportedChain, Address>>;
 };

@@ -21,6 +21,7 @@ export class CctpClient {
       maxAttestationAttempts: config.maxAttestationAttempts ?? 60,
       pollIntervalMs: config.pollIntervalMs ?? 0,
       rpcs: config.rpcs ?? {},
+      hookExecutors: config.hookExecutors ?? {},
     };
   }
 

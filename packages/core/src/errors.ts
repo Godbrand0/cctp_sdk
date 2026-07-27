@@ -34,6 +34,17 @@ export class InvalidStateTransitionError extends CctpError {
   }
 }
 
+export class HookExecutorRequiredError extends CctpError {
+  constructor(chain: string) {
+    super(
+      `Transfer includes a hook but no hook executor is configured for destination chain "${chain}". ` +
+        `CCTP V2 does not execute hookData — a deployed executor contract must relay the message and run the hook. ` +
+        `Set hookExecutors["${chain}"] in CctpClientConfig or pass hookExecutor in the transfer params.`,
+      "HOOK_EXECUTOR_REQUIRED"
+    );
+  }
+}
+
 export class MessageParseError extends CctpError {
   constructor(txHash: string) {
     super(`Could not extract MessageSent event from tx ${txHash}`, "MESSAGE_PARSE_ERROR");

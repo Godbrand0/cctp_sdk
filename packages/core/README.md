@@ -89,6 +89,11 @@ const client = new CctpClient({
 
   // Optional: poll interval in ms — 0 uses exponential backoff (default)
   pollIntervalMs: 0,
+
+  // Required for hooks: per-chain hook executor contracts (see "Destination hooks")
+  hookExecutors: {
+    arbitrum: "0xYourHookExecutor",
+  },
 });
 ```
 
@@ -104,7 +109,8 @@ const client = new CctpClient({
 | `fast` | `boolean` | No | Use CCTP v2 fast lane. Fetches minimum fee from Iris automatically. |
 | `recipient` | `Address` | No | Override recipient on destination. Defaults to sender. |
 | `maxFee` | `bigint` | No | Override fast lane fee. Auto-fetched from Iris if omitted. |
-| `hook` | `TransferHook` | No | Execute a contract call at mint time on the destination chain. |
+| `hook` | `TransferHook` | No | Execute a contract call at mint time on the destination chain. Requires a hook executor. |
+| `hookExecutor` | `Address` | With `hook`* | Hook executor contract on the destination chain. *Optional if `hookExecutors[to]` is set in the client config. |
 
 ---
 
@@ -147,6 +153,23 @@ const result = await transfer.wait();
 
 Execute arbitrary contract logic on the destination chain at mint time — swap, deposit into a vault, pay a contract, etc.
 
+**Hooks require a deployed hook executor contract on the destination chain.** CCTP V2
+carries hookData inside the attested message but never executes it — Circle's contracts
+only mint USDC. The executor closes that gap: the SDK sets it as the burn's
+`mintRecipient` (so the minted USDC lands where the hook can spend it) **and** as
+`destinationCaller` (so nobody can relay the message without the hook running in the
+same transaction). At relay time the SDK calls `relayAndExecute(message, attestation)`
+on the executor, which mints the USDC via `receiveMessage`, decodes the hook from the
+attested message — a relayer cannot substitute its own instructions — and executes it,
+refunding USDC to the sender if the hook call reverts.
+
+The executor interface is exported as `HOOK_EXECUTOR_ABI`. A reference implementation
+(`ReceiveAndSwap.sol`) lives in the [Conduit](https://github.com/Godbrand0/conduit) repo.
+
+Configure the executor per destination chain in the client config (`hookExecutors`) or
+per transfer (`hookExecutor`). A transfer with a `hook` but no executor fails fast with
+`HOOK_EXECUTOR_REQUIRED` rather than silently minting plain USDC.
+
 ```typescript
 import { CctpClient, encodeHook } from "@cctp-sdk/core";
 
@@ -161,6 +184,7 @@ const transfer = await client.transfer(
       calldata: "0x...",
       forwardAmount: parseUnits("50", 6),
     },
+    hookExecutor: "0xYourHookExecutor", // or set hookExecutors in the client config
   },
   wallet
 );

@@ -23,8 +23,8 @@ describe("fee estimation", () => {
     (viem.createPublicClient as any).mockReturnValue(mockPublicClient);
 
     const params = {
-      sourceChain: "ethereum" as const,
-      destinationChain: "arbitrum" as const,
+      from: "ethereum" as const,
+      to: "arbitrum" as const,
       amount: 100000000n, // 100 USDC
       fast: true,
     };
@@ -34,6 +34,8 @@ describe("fee estimation", () => {
       attestationApiUrl: "http://mock",
       maxAttestationAttempts: 10,
       pollIntervalMs: 1000,
+      chains: [],
+      hookExecutors: {},
       rpcs: {},
     };
 
@@ -57,8 +59,8 @@ describe("fee estimation", () => {
     (viem.createPublicClient as any).mockReturnValue(mockPublicClient);
 
     const params = {
-      sourceChain: "base" as const,
-      destinationChain: "arbitrum" as const,
+      from: "base" as const,
+      to: "arbitrum" as const,
       amount: 100000000n,
       fast: false,
     };
@@ -68,6 +70,8 @@ describe("fee estimation", () => {
       attestationApiUrl: "http://mock",
       maxAttestationAttempts: 10,
       pollIntervalMs: 1000,
+      chains: [],
+      hookExecutors: {},
       rpcs: {},
     };
 
@@ -76,6 +80,6 @@ describe("fee estimation", () => {
     expect(res.isFast).toBe(false);
     expect(res.gasCostWei).toBe(100000000000000n); // 100000 * 1000000000
     expect(res.bridgeFeeUsdc).toBe(0n);
-    expect(res.estimatedSeconds).toBe(20);
+    expect(res.estimatedSeconds).toBe(1200);
   });
 });

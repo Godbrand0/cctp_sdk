@@ -1,8 +1,17 @@
 {
   "name": "@cctp-sdk/core",
-  "version": "0.2.0",
-  "description": "Production-grade CCTP v2 SDK — cross-chain USDC transfers in one function call",
-  "keywords": ["cctp", "circle", "usdc", "cross-chain", "bridge", "viem", "ethereum", "arc"],
+  "version": "0.2.1",
+  "description": "Production-grade CCTP v2 SDK \u2014 cross-chain USDC transfers in one function call",
+  "keywords": [
+    "cctp",
+    "circle",
+    "usdc",
+    "cross-chain",
+    "bridge",
+    "viem",
+    "ethereum",
+    "arc"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",

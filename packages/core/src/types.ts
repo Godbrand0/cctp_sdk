@@ -6,9 +6,10 @@ export type TransferParams = {
   from: SupportedChain;
   /** Destination chain name */
   to: SupportedChain;
-  /** Amount in USDC base units. Most chains use 6 decimals — use parseUnits("10", 6) for $10.
-   *  Arc is the exception: USDC is the native gas token with 18 decimals — use parseUnits("10", 18).
-   *  Check ChainConfig.usdcDecimals for the correct precision per chain. */
+  /** Amount in USDC base units — use parseUnits("10", 6) for $10 on every chain,
+   *  including Arc. Arc's native gas token is USDC (18-decimal balance), but the
+   *  ERC20 view CCTP burns from rescales to the standard 6 decimals, same as
+   *  every other chain. Check ChainConfig.usdcDecimals to confirm per chain. */
   amount: bigint;
   /** Recipient address on destination chain. Defaults to sender if omitted. */
   recipient?: Address;

@@ -270,8 +270,12 @@ export const TESTNET_CHAINS = {
     rpcUrl: "https://rpc.testnet.arc.network",
     tokenMessenger: TESTNET_TOKEN_MESSENGER,
     messageTransmitter: TESTNET_MSG_TRANSMITTER,
+    // Arc's native gas token IS USDC; this address is an ERC20-view precompile
+    // over the native balance. Verified on-chain 2026-07-30: decimals() == 6,
+    // matching every other CCTP chain (NOT 18 — the native balance itself is
+    // 18-decimal, but the CCTP-facing ERC20 view rescales to the standard 6).
     usdc: "0x3600000000000000000000000000000000000000" as `0x${string}`,
-    usdcDecimals: 18,
+    usdcDecimals: 6,
     fastTransferSupported: true,
     blockExplorer: "https://testnet.arcscan.app",
   },

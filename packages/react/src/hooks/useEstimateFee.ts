@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { type FeeEstimate, type TransferParams } from "@arc/cctp-sdk";
+import { type FeeEstimate, type TransferParams } from "@cctp-sdk/core";
 import { useCctpClient } from "../provider";
 
 export function useEstimateFee(
-  params: Pick<TransferParams, "sourceChain" | "destinationChain" | "amount" | "fast"> | null
+  params: Pick<TransferParams, "from" | "to" | "amount" | "fast"> | null
 ) {
   const client = useCctpClient();
   const [estimate, setEstimate] = useState<FeeEstimate | null>(null);
@@ -13,7 +13,7 @@ export function useEstimateFee(
     if (!params || !params.amount) return;
     setLoading(true);
     client.estimateFee(params).then(setEstimate).finally(() => setLoading(false));
-  }, [client, params?.sourceChain, params?.destinationChain, params?.amount?.toString(), params?.fast]);
+  }, [client, params?.from, params?.to, params?.amount?.toString(), params?.fast]);
 
   return { estimate, loading };
 }

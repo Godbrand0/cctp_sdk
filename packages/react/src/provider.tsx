@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useMemo } from "react";
-import { CctpClient, type CctpClientConfig } from "@arc/cctp-sdk";
+import { CctpClient, type CctpClientConfig } from "@cctp-sdk/core";
 
 type CctpContextType = {
   client: CctpClient;

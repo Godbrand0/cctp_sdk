@@ -1,7 +1,7 @@
 {
   "name": "@arc/cctp-sdk-react",
   "version": "0.1.0",
-  "description": "React hooks for @arc/cctp-sdk",
+  "description": "React hooks for @cctp-sdk/core",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -22,7 +22,7 @@
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0",
     "viem": ">=2.0.0",
-    "@arc/cctp-sdk": "workspace:*"
+    "@cctp-sdk/core": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^18.0.0",
@@ -30,7 +30,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "viem": "^2.0.0",
-    "@arc/cctp-sdk": "workspace:*",
+    "@cctp-sdk/core": "workspace:*",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0",
     "vitest": "^1.0.0"

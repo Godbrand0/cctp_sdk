@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { type TransferParams, TransferState } from "@arc/cctp-sdk";
+import { type TransferParams, TransferState } from "@cctp-sdk/core";
 import { useCctpClient } from "../provider";
 import type { WalletClient } from "viem";
 

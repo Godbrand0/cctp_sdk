@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: ["react", "react-dom", "viem", "@arc/cctp-sdk"],
+  external: ["react", "react-dom", "viem", "@cctp-sdk/core"],
 });

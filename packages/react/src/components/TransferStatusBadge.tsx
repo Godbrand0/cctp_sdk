@@ -1,5 +1,5 @@
 import React from "react";
-import { TransferState } from "@arc/cctp-sdk";
+import { TransferState } from "@cctp-sdk/core";
 
 export type TransferStatusBadgeProps = {
   state: TransferState;

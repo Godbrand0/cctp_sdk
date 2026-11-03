@@ -1,0 +1,52 @@
+{
+  "name": "@cctp-sdk/stellar",
+  "version": "0.0.1",
+  "description": "Receive Circle CCTP V2 USDC on Stellar with a bound, attested recipient — hookData codec, message parser and network registry",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@stellar/stellar-sdk": ">=13"
+  },
+  "devDependencies": {
+    "@stellar/stellar-sdk": "^17.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0",
+    "@types/node": "^22.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Godbrand0/cctp_sdk.git",
+    "directory": "packages/stellar"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "cctp",
+    "circle",
+    "usdc",
+    "stellar",
+    "soroban",
+    "cross-chain"
+  ]
+}

@@ -1,5 +1,5 @@
 {
-  "name": "@arc/cctp-sdk-hardhat",
+  "name": "@cctp-sdk/hardhat",
   "version": "0.1.0",
   "description": "Hardhat plugin for local testing of CCTP v2 transfers",
   "main": "dist/index.cjs",

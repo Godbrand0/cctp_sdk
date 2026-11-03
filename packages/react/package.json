@@ -1,5 +1,5 @@
 {
-  "name": "@arc/cctp-sdk-react",
+  "name": "@cctp-sdk/react",
   "version": "0.1.0",
   "description": "React hooks for @cctp-sdk/core",
   "main": "dist/index.cjs",

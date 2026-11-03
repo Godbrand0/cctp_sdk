@@ -24,6 +24,7 @@ export const packages = [
   {
     name: "@cctp-sdk/core",
     version: "0.2.1",
+    npm: "https://www.npmjs.com/package/@cctp-sdk/core",
     blurb:
       "The main SDK. CctpClient runs approve → burn → attest → relay, with a resumable state machine, fee estimation, fast lane and destination hooks. Built on viem v2.",
   },
@@ -36,6 +37,7 @@ export const packages = [
   {
     name: "@cctp-sdk/stellar",
     version: "0.0.1",
+    npm: "https://www.npmjs.com/package/@cctp-sdk/stellar",
     blurb:
       "Receive CCTP V2 USDC on Stellar with a recipient bound inside Circle's attestation. hookData codec, message parser, Iris client and a resumable StellarRelayer. Pre-alpha.",
   },

@@ -4,10 +4,13 @@ import { testnet, states } from "../lib/content";
 import { CopyButton } from "./CopyButton";
 
 const evm = testnet;
+const stellar = ["stellar", "Stellar Testnet", "27", "27"];
+const dests = [...evm, stellar];
+const stellarSteps = ["IDLE", "BURNING", "BURNED", "AWAITING_ATTESTATION", "ATTESTED", "MINTED", "COMPLETE"];
 const phaseOf = (s: string) =>
   ["APPROVING", "APPROVED", "BURNING", "BURNED"].includes(s) ? "burn"
   : ["AWAITING_ATTESTATION", "ATTESTED"].includes(s) ? "attest"
-  : ["RELAYING", "COMPLETE"].includes(s) ? "mint" : "idle";
+  : ["RELAYING", "MINTED", "COMPLETE"].includes(s) ? "mint" : "idle";
 
 function fakeHash(seed: string) {
   let h = 2166136261;
@@ -29,37 +32,55 @@ export function Simulator() {
   const [running, setRunning] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const state = states[idx];
-  const last = states.length - 1;
+  const isStellar = to === "stellar";
+  const steps: readonly string[] = isStellar ? stellarSteps : states;
+  const state = steps[idx];
+  const last = steps.length - 1;
   const fromC = evm.find((c) => c[0] === from)!;
-  const toC = evm.find((c) => c[0] === to)!;
+  const toC = dests.find((c) => c[0] === to)!;
   const seed = `${from}${to}${amount}${fast}`;
 
   useEffect(() => {
     if (!running) return;
     if (idx >= last) { setRunning(false); return; }
-    const next = states[idx + 1];
-    const delay = next === "AWAITING_ATTESTATION" ? 700 : next === "ATTESTED" ? (fast ? 1600 : 4200) : next === "COMPLETE" ? 1200 : 800;
+    const next = steps[idx + 1];
+    const delay = next === "AWAITING_ATTESTATION" ? 700 : next === "ATTESTED" ? (fast ? 1600 : 4200) : next === "MINTED" || next === "COMPLETE" ? 1200 : 800;
     timer.current = setTimeout(() => setIdx(idx + 1), delay);
     return () => clearTimeout(timer.current);
-  }, [running, idx, last, fast]);
+  }, [running, idx, last, fast, steps]);
 
   const reset = () => { clearTimeout(timer.current); setRunning(false); setIdx(0); };
   const run = () => { setIdx(1); setRunning(true); };
   const changed = <T,>(set: (v: T) => void) => (v: T) => { set(v); reset(); };
 
   const snapshot = useMemo(() => {
-    const s: Record<string, unknown> = { state, transferId: "tr_" + fakeHash(seed).slice(2, 14) };
-    if (idx >= states.indexOf("BURNED")) s.sourceTxHash = fakeHash(seed + "src");
-    if (idx >= states.indexOf("ATTESTED")) {
+    const at = (name: string) => idx >= steps.indexOf(name);
+    const s: Record<string, unknown> = isStellar
+      ? { status: idx >= last ? "complete" : at("MINTED") ? "minted" : "pending" }
+      : { state, transferId: "tr_" + fakeHash(seed).slice(2, 14) };
+    if (at("BURNED")) s.sourceTxHash = fakeHash(seed + "src");
+    if (at("ATTESTED")) {
       s.messageBytes = fakeHash(seed + "msg").slice(0, 24) + "…";
       s.attestation = fakeHash(seed + "att").slice(0, 24) + "…";
     }
-    if (idx >= last) s.destinationTxHash = fakeHash(seed + "dst");
+    if (isStellar) {
+      if (at("MINTED")) s.mintTx = fakeHash(seed + "mint").slice(2, 66);
+      if (idx >= last) s.consumerTx = fakeHash(seed + "consumer").slice(2, 66);
+    } else if (idx >= last) s.destinationTxHash = fakeHash(seed + "dst");
     return JSON.stringify(s, null, 2);
-  }, [state, idx, seed, last]);
+  }, [state, idx, seed, last, steps, isStellar]);
 
-  const code = `const transfer = await client.transfer(
+  const code = isStellar
+    ? `// 1. Burn on ${fromC[1]} with the recipient bound in hookData (your wallet)
+const hookData = encodeAttributedHookData({
+  forwardTo: CONSUMER_ID,
+  recipient: "G...",
+  minOut: 0n,
+});
+
+// 2. Attest, mint_and_forward, then call your contract
+await relayer.relay(burnTxHash, ${fromC[3]});`
+    : `const transfer = await client.transfer(
   { from: "${from}", to: "${to}", amount: parseUnits("${Number(amount) > 0 ? amount : "0"}", 6)${fast ? ", fast: true" : ""} },
   wallet
 );`;
@@ -77,7 +98,7 @@ export function Simulator() {
         </label>
         <label>To
           <select value={to} onChange={(e) => changed(setTo)(e.target.value)}>
-            {evm.map((c) => <option key={c[0]} value={c[0]} disabled={c[0] === from}>{c[1]}</option>)}
+            {dests.map((c) => <option key={c[0]} value={c[0]} disabled={c[0] === from}>{c[1]}</option>)}
           </select>
         </label>
         <label>USDC
@@ -104,7 +125,7 @@ export function Simulator() {
 
       <div className="sim-body">
         <ol className="timeline" aria-live="polite">
-          {states.slice(1).map((s, i) => {
+          {steps.slice(1).map((s, i) => {
             const n = i + 1;
             const status = n < idx ? "done" : n === idx ? (idx === last ? "done" : "active") : "todo";
             return (
@@ -116,7 +137,7 @@ export function Simulator() {
           })}
         </ol>
         <div className="sim-out">
-          <div className="out-head"><span>stateChange snapshot</span></div>
+          <div className="out-head"><span>{isStellar ? "Relay record" : "stateChange snapshot"}</span></div>
           <pre><code>{snapshot}</code></pre>
           <div className="out-head"><span>Your code</span><CopyButton text={code} /></div>
           <pre><code>{code}</code></pre>
@@ -124,7 +145,7 @@ export function Simulator() {
       </div>
       <p className="sim-note">
         Simulated in your browser. No wallet, network or Circle API is touched, and hashes are made up.
-        {fast ? " Fast lane attests in seconds." : " Standard transfers wait for source-chain finality, which takes minutes on a real network."}
+        {isStellar ? " On Stellar the source-side burn is done from your own wallet, because burn helpers for Stellar aren't shipped yet. The relayer takes it from the burn transaction." : fast ? " Fast lane attests in seconds." : " Standard transfers wait for source-chain finality, which takes minutes on a real network."}
       </p>
     </section>
   );

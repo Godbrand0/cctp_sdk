@@ -63,7 +63,10 @@ export default function Home() {
       <header className="top">
         <div className="top-in">
           <a href="#top" className="brand"><span className="brand-mark" aria-hidden="true" />cctp-sdk</a>
-          <a href="https://github.com/Godbrand0/cctp_sdk">GitHub</a>
+          <span className="top-links">
+            <a href="https://www.npmjs.com/org/cctp-sdk">npm</a>
+            <a href="https://github.com/Godbrand0/cctp_sdk">GitHub</a>
+          </span>
         </div>
       </header>
 
@@ -142,7 +145,11 @@ export default function Home() {
             <ul className="pkgs">
               {packages.map((p) => (
                 <li key={p.name}>
-                  <div><code>{p.name}</code><span className="muted">{p.version}</span></div>
+                  <div>
+                    <code>{p.name}</code>
+                    <span className="muted">{p.version}</span>
+                    {"npm" in p && <a className="muted" href={p.npm}>View on npm</a>}
+                  </div>
                   <p>{p.blurb}</p>
                 </li>
               ))}
@@ -169,7 +176,10 @@ export default function Home() {
 
       <footer className="foot">
         <span>MIT licensed</span>
-        <a href="https://github.com/Godbrand0/cctp_sdk">github.com/Godbrand0/cctp_sdk</a>
+        <span className="top-links">
+          <a href="https://www.npmjs.com/org/cctp-sdk">npmjs.com/org/cctp-sdk</a>
+          <a href="https://github.com/Godbrand0/cctp_sdk">github.com/Godbrand0/cctp_sdk</a>
+        </span>
       </footer>
     </>
   );

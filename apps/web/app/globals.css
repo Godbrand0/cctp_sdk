@@ -156,3 +156,4 @@ th { color: var(--muted); font-weight: 600; font-size: 14px; }
   html { scroll-behavior: auto; }
   .fill, .packet, .node { transition: none; }
 }
+.top-links { display: flex; gap: 20px; flex-wrap: wrap; }

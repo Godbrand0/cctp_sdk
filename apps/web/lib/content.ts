@@ -136,12 +136,12 @@ export const feeCode = `const fee = await client.estimateFee({
 });
 // fee.gasCostWei, fee.bridgeFeeUsdc, fee.estimatedSeconds`;
 
-export const reactCode = `<CctpProvider client={client}>
+export const reactCode = `<CctpProvider config={{ env: "testnet" }}>
   <App />
 </CctpProvider>
 
-const { transfer, state } = useTransfer();
-const fee = useEstimateFee({ from, to, amount, fast: true });
+const { transfer, state, isLoading } = useTransfer();
+const { estimate } = useEstimateFee({ from, to, amount, fast: true });
 <TransferStatusBadge state={state} />`;
 
 export const stellarCode = `const relayer = new StellarRelayer({

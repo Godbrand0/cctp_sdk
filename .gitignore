@@ -11,3 +11,4 @@ test_output.log
 
 .next/
 next-env.d.ts
+*.tsbuildinfo

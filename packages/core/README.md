@@ -261,7 +261,7 @@ console.log("Est. time:", fee.estimatedSeconds, "seconds");
 
 ## Notes
 
-- **USDC decimals**: 6 on all chains except Arc testnet (18 — USDC is the native gas token). Always check `ChainConfig.usdcDecimals` or use `TESTNET_CHAINS.arc.usdcDecimals`.
+- **USDC decimals**: 6 on every supported chain, Arc testnet included. Read `ChainConfig.usdcDecimals` rather than hardcoding it.
 - **Fast lane fee**: Circle charges a minimum fee (~1.3 USDC on testnet) for fast transfers. Set `fast: true` and the SDK fetches the current minimum from Iris automatically.
 - **Message bytes**: CCTP v2 raw event logs encode the nonce as zero. The SDK uses Iris-provided message bytes for the relay call to avoid this.
 - **Two wallets**: Pass a second wallet client to `transfer()` if your source and destination signers are different (e.g. different chains on a hardware wallet).

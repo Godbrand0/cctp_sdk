@@ -1,22 +1,36 @@
 # @cctp-sdk/stellar
 
-Receive Circle CCTP V2 USDC on Stellar with a **recipient bound inside Circle's attestation**.
+Let a Soroban contract act on inbound Circle CCTP V2 USDC **for a specific user**, using instructions that are part of Circle's attested message.
 
 Extracted from [Conduit](https://github.com/Godbrand0/conduit), where this design is proven on testnet
 (Arbitrum Sepolia → Stellar, one user signature). Status: **pre-alpha**.
 
 ## The problem
 
-Circle's `CctpForwarder` on Stellar only mints USDC and forwards it to a plain
-address. It cannot run a hook, so anything that needs to know *who a deposit is
-for* (an anchor, a wallet, a swap) has to trust whoever relays the message.
+A burn bound for Stellar targets Circle's `CctpForwarder`, and the forwarding
+address goes in `hookData`. That address is part of the attested message, so a
+relayer can't redirect the funds. If you are sending USDC straight to a user's
+own account, you don't need this package.
+
+The forwarder *transfers* USDC to that address but never *invokes* it. When the
+destination is a contract that has to do something for a particular user (swap
+into another asset with a slippage floor, deposit into a vault, credit a user
+at an anchor), Circle's format has no field for who the deposit is for or what
+floor applies. The contract just sees USDC arrive.
 
 ## The approach
 
 The burn's `hookData` carries Circle's forwarder format followed by a trailing
 section (final recipient + minimum-output floor). The forwarder ignores the
-trailing bytes; a consumer contract re-parses the same attested message and
-reads them, so the recipient cannot be changed by the relayer.
+trailing bytes. The consumer contract is called with the same attested message,
+verifies it, and reads its per-user instructions from it. This is the Stellar
+counterpart of destination hooks in `@cctp-sdk/core`.
+
+A consumer must check, in order: the attestation, destination domain 27, that
+the forward-to address is itself, that the mint recipient is the forwarder,
+`is_nonce_used` on Circle's MessageTransmitter, and its own delivered-nonce map
+(recorded before paying out). The [`attested-receiver`](../../crates/attested-receiver)
+crate provides each check.
 
 ## What's included
 

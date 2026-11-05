@@ -9,6 +9,7 @@ use soroban_sdk::{Address, Bytes, BytesN, Env, String};
 // feeExecuted(32) expirationBlock(32) = 228, so hookData starts at 376.
 const DESTINATION_DOMAIN_OFFSET: u32 = 8;
 const NONCE_OFFSET: u32 = 12;
+const MINT_RECIPIENT_OFFSET: u32 = 184;
 const AMOUNT_OFFSET: u32 = 216;
 const HOOK_DATA_OFFSET: u32 = 376;
 
@@ -66,6 +67,45 @@ pub fn amount(message: &Bytes) -> Result<i128, Error> {
     Ok(amount)
 }
 
+/// The body's mintRecipient. For a Stellar-bound message Circle requires this
+/// to be the CctpForwarder contract's 32-byte id.
+pub fn mint_recipient(message: &Bytes) -> Result<BytesN<32>, Error> {
+    slice(message, MINT_RECIPIENT_OFFSET, 32)?
+        .try_into()
+        .map_err(|_| Error::MalformedMessage)
+}
+
+/// Defence in depth: require the message to have been minted through
+/// `forwarder` (its 32-byte contract id).
+pub fn require_mint_recipient(message: &Bytes, forwarder: &BytesN<32>) -> Result<(), Error> {
+    if mint_recipient(message)? != *forwarder {
+        return Err(Error::WrongMintRecipient);
+    }
+    Ok(())
+}
+
+/// The address Circle's CctpForwarder sent the minted USDC to (Circle's own
+/// section of the hookData).
+pub fn forward_to(env: &Env, message: &Bytes) -> Result<Address, Error> {
+    check_length(message)?;
+    let circle_len = read_u32(&slice(message, HOOK_DATA_OFFSET + CIRCLE_LEN_OFFSET, 4)?)?;
+    if circle_len != STRKEY_LENGTH {
+        return Err(Error::MalformedMessage);
+    }
+    read_strkey(env, &slice(message, HOOK_DATA_OFFSET + CIRCLE_START, circle_len)?)
+}
+
+/// Require the minted USDC to have been forwarded to `expected`, normally
+/// `env.current_contract_address()`. Without this check, a valid attested
+/// message whose USDC went somewhere else would pass every other check, and a
+/// consumer would pay it out of funds that belong to other deposits.
+pub fn require_forward_to(env: &Env, message: &Bytes, expected: &Address) -> Result<(), Error> {
+    if forward_to(env, message)? != *expected {
+        return Err(Error::WrongForwardTo);
+    }
+    Ok(())
+}
+
 /// Read the `recipient + min_out` section that follows Circle's own
 /// forward-to strkey in the hookData.
 pub fn attributed_hook(env: &Env, message: &Bytes) -> Result<AttributedHook, Error> {
@@ -83,10 +123,17 @@ pub fn attributed_hook(env: &Env, message: &Bytes) -> Result<AttributedHook, Err
     let recipient_bytes = slice(message, recipient_start, recipient_len)?;
     let min_out = read_i128_16(&slice(message, recipient_start + recipient_len, MIN_OUT_LENGTH)?)?;
 
-    let mut buf = [0u8; STRKEY_LENGTH as usize];
-    recipient_bytes.copy_into_slice(&mut buf);
-    let recipient = Address::from_string(&String::from_bytes(env, &buf));
+    let recipient = read_strkey(env, &recipient_bytes)?;
     Ok(AttributedHook { recipient, min_out })
+}
+
+fn read_strkey(env: &Env, b: &Bytes) -> Result<Address, Error> {
+    if b.len() != STRKEY_LENGTH {
+        return Err(Error::MalformedMessage);
+    }
+    let mut buf = [0u8; STRKEY_LENGTH as usize];
+    b.copy_into_slice(&mut buf);
+    Ok(Address::from_string(&String::from_bytes(env, &buf)))
 }
 
 /// Bounds-checked slice: a short message is an error, never a host panic.

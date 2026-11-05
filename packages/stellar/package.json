@@ -1,7 +1,7 @@
 {
   "name": "@cctp-sdk/stellar",
   "version": "0.0.1",
-  "description": "Receive Circle CCTP V2 USDC on Stellar with a bound, attested recipient — hookData codec, message parser and network registry",
+  "description": "Let Soroban contracts act on inbound CCTP V2 USDC for a specific user via attested hookData: codec, message parser, network registry and relayer",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.cjs",

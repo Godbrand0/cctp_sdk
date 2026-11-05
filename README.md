@@ -1,6 +1,6 @@
 # CCTP SDK
 
-TypeScript tooling for Circle's [Cross-Chain Transfer Protocol (CCTP) v2](https://developers.circle.com/cctp): move USDC between chains with one function call, and receive it on Stellar with the recipient bound inside Circle's attestation.
+TypeScript tooling for Circle's [Cross-Chain Transfer Protocol (CCTP) v2](https://developers.circle.com/cctp): move USDC between chains with one function call, and let Stellar contracts act on inbound USDC for a specific user using Circle-attested instructions.
 
 | Package | Version | What it is |
 |---|---|---|

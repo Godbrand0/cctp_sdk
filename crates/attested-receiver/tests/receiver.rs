@@ -52,6 +52,18 @@ struct Msg {
 
 /// A synthetic CCTP V2 burn message with the attributed hookData appended.
 fn build(env: &Env, dest_domain: u32, nonce: u8, amount: u128, recipient: &Address, min_out: u128) -> Msg {
+    build_to(env, dest_domain, nonce, amount, &Address::generate(env), recipient, min_out)
+}
+
+fn build_to(
+    env: &Env,
+    dest_domain: u32,
+    nonce: u8,
+    amount: u128,
+    forward_to: &Address,
+    recipient: &Address,
+    min_out: u128,
+) -> Msg {
     let mut b = std::vec![0u8; 376];
     b[8..12].copy_from_slice(&dest_domain.to_be_bytes());
     b[12..44].fill(nonce);
@@ -59,7 +71,7 @@ fn build(env: &Env, dest_domain: u32, nonce: u8, amount: u128, recipient: &Addre
     // hookData: 24 reserved + 4 version + 4 len + 56 forwardTo
     b.extend_from_slice(&[0u8; 28]);
     b.extend_from_slice(&(STRKEY_LEN as u32).to_be_bytes());
-    b.extend_from_slice(&strkey(env, &Address::generate(env)));
+    b.extend_from_slice(&strkey(env, forward_to));
     b.extend_from_slice(&(STRKEY_LEN as u32).to_be_bytes());
     b.extend_from_slice(&strkey(env, recipient));
     b.extend_from_slice(&min_out.to_be_bytes());
@@ -194,6 +206,34 @@ fn parses_fields() {
 }
 
 #[test]
+fn forward_to_check() {
+    let env = Env::default();
+    let me = Address::generate(&env);
+    let other = Address::generate(&env);
+    let r = Address::generate(&env);
+    let mine = to_bytes(&env, &build_to(&env, 27, 1, 1, &me, &r, 0).bytes);
+    assert_eq!(message::forward_to(&env, &mine), Ok(me.clone()));
+    assert_eq!(message::require_forward_to(&env, &mine, &me), Ok(()));
+    // a valid message whose USDC went to someone else must not be delivered
+    let theirs = to_bytes(&env, &build_to(&env, 27, 1, 1, &other, &r, 0).bytes);
+    assert_eq!(message::require_forward_to(&env, &theirs, &me), Err(Error::WrongForwardTo));
+}
+
+#[test]
+fn mint_recipient_check() {
+    let env = Env::default();
+    let r = Address::generate(&env);
+    let mut m = build(&env, 27, 1, 1, &r, 0).bytes;
+    m[184..216].fill(0x07);
+    let bytes = to_bytes(&env, &m);
+    let forwarder = BytesN::from_array(&env, &[0x07; 32]);
+    assert_eq!(message::mint_recipient(&bytes), Ok(forwarder.clone()));
+    assert_eq!(message::require_mint_recipient(&bytes, &forwarder), Ok(()));
+    let wrong = BytesN::from_array(&env, &[0x08; 32]);
+    assert_eq!(message::require_mint_recipient(&bytes, &wrong), Err(Error::WrongMintRecipient));
+}
+
+#[test]
 fn destination_domain_check() {
     let env = Env::default();
     let r = Address::generate(&env);
@@ -257,4 +297,8 @@ fn parses_hookdata_produced_by_the_typescript_encoder() {
     parsed.recipient.to_string().copy_into_slice(&mut buf);
     assert_eq!(core::str::from_utf8(&buf).unwrap(), "GACQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQKG7N");
     assert_eq!(parsed.min_out, 123456789);
+    let fw = message::forward_to(&env, &to_bytes(&env, &msg)).unwrap();
+    let mut fw_buf = [0u8; STRKEY_LEN];
+    fw.to_string().copy_into_slice(&mut fw_buf);
+    assert_eq!(core::str::from_utf8(&fw_buf).unwrap(), "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR");
 }

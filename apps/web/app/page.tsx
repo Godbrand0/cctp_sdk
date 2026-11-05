@@ -121,11 +121,13 @@ export default function Home() {
           <section id="stellar">
             <h2>Receiving on Stellar</h2>
             <p>
-              Circle’s forwarder on Stellar only mints USDC and sends it to a plain address, so
-              anything that needs to know who a deposit is for has to trust the relayer.
-              <code> @cctp-sdk/stellar</code> removes that trust. It appends the final recipient and a
-              minimum-output floor to the burn’s hookData, and a Soroban contract reads them back
-              out of the attested message.
+              Circle’s forwarder on Stellar mints USDC and transfers it to the address in the
+              hookData. That address is attested, so it can’t be redirected, but the forwarder never
+              calls it. A contract that has to act for a particular user, such as a swap with a
+              slippage floor, a vault deposit or an anchor credit, has no attested way to know who a
+              deposit is for. <code>@cctp-sdk/stellar</code> appends the final recipient and a
+              minimum-output floor to the burn’s hookData, and the contract reads them back out of
+              the attested message.
             </p>
             <HookDataDiagram />
             <Code>{stellarCode}</Code>

@@ -2,21 +2,35 @@
 //! Verify Circle CCTP V2 attestations and read attested hookData inside a
 //! Soroban contract.
 //!
-//! Circle's Stellar `CctpForwarder` mints USDC and forwards it to a plain
-//! address; it cannot run a hook. A contract that wants to know who a deposit
-//! is *for* therefore receives the same attested message a second time and
-//! reads the recipient out of the hookData. That is only safe if the contract
-//! authenticates the message bytes itself, which is what this crate does:
+//! Circle's Stellar `CctpForwarder` mints USDC and transfers it to the
+//! address in the hookData. That address is attested, so it can't be
+//! redirected, but the forwarder never invokes it. A contract that has to act
+//! for a specific user (swap with a floor, vault deposit, anchor credit)
+//! therefore receives the same attested message in a second call and reads
+//! its per-user instructions from a trailing hookData section. That is only
+//! safe if the contract authenticates the bytes and ties them to funds it
+//! actually received:
 //!
-//! * [`attestation::verify`] — threshold ECDSA over keccak256(message), as
+//! * [`attestation::verify`]: threshold ECDSA over keccak256(message), as
 //!   Circle's EVM `MessageTransmitter` does.
-//! * [`message`] — bounds-checked readers for the CCTP V2 burn message and the
-//!   trailing `recipient + min_out` section (see the `@cctp-sdk/stellar` npm
-//!   package for the matching encoder).
+//! * [`message`]: bounds-checked readers for the CCTP V2 burn message, Circle's
+//!   forward-to address and the trailing `recipient + min_out` section (see
+//!   the `@cctp-sdk/stellar` npm package for the matching encoder).
 //!
-//! This crate holds no storage and no funds. Replay protection (a delivered
-//! nonce map), the `is_nonce_used` check against Circle's MessageTransmitter,
-//! attester-set management and admin auth are the consumer's responsibility.
+//! This crate holds no storage and no funds. A consumer's delivery function
+//! must, in this order:
+//!
+//! 1. [`attestation::verify`] the message.
+//! 2. [`message::require_destination_domain`] with 27 (Stellar).
+//! 3. [`message::require_forward_to`] with its own address. Otherwise a valid
+//!    message whose USDC went elsewhere is paid out of other users' funds.
+//! 4. [`message::require_mint_recipient`] with the CctpForwarder's id.
+//! 5. Check the nonce with `is_nonce_used` on Circle's MessageTransmitter,
+//!    which proves the mint happened.
+//! 6. Record the nonce in its own delivered map *before* paying out.
+//! 7. Read [`message::attributed_hook`] and act on it.
+//!
+//! Attester-set management and admin auth are also the consumer's job.
 //!
 //! **Status: unaudited.** Ported from Conduit's `swap_and_deliver`, whose own
 //! internal audit found two critical bugs in this logic before it was fixed.
@@ -35,4 +49,6 @@ pub enum Error {
     InvalidAttestation = 101,
     InvalidConfig = 102,
     WrongDestination = 103,
+    WrongForwardTo = 104,
+    WrongMintRecipient = 105,
 }

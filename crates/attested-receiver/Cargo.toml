@@ -1,6 +1,6 @@
 [package]
 name = "attested-receiver"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 description = "Verify Circle CCTP V2 attestations and read attested hookData inside Soroban contracts"
 license = "MIT"

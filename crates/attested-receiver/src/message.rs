@@ -11,6 +11,7 @@ const DESTINATION_DOMAIN_OFFSET: u32 = 8;
 const NONCE_OFFSET: u32 = 12;
 const MINT_RECIPIENT_OFFSET: u32 = 184;
 const AMOUNT_OFFSET: u32 = 216;
+const FEE_EXECUTED_OFFSET: u32 = 312;
 const HOOK_DATA_OFFSET: u32 = 376;
 
 // Within hookData: 24 reserved + 4 version + 4 length = 32 bytes before
@@ -57,7 +58,8 @@ pub fn nonce(message: &Bytes) -> Result<BytesN<32>, Error> {
         .map_err(|_| Error::MalformedMessage)
 }
 
-/// The burned USDC amount. Rejects anything that does not fit a positive i128
+/// The burned USDC amount in the message's 6-decimal units, before the
+/// fee. Use [`delivered_amount`] for what actually arrived. Rejects anything that does not fit a positive i128
 /// rather than truncating it.
 pub fn amount(message: &Bytes) -> Result<i128, Error> {
     let amount = read_i128_32(&slice(message, AMOUNT_OFFSET, 32)?)?;
@@ -65,6 +67,33 @@ pub fn amount(message: &Bytes) -> Result<i128, Error> {
         return Err(Error::MalformedMessage);
     }
     Ok(amount)
+}
+
+/// The fee Circle took on the source side, in the message's 6-decimal units.
+/// The mint delivers `amount - fee_executed`, not `amount`.
+pub fn fee_executed(message: &Bytes) -> Result<i128, Error> {
+    let fee = read_i128_32(&slice(message, FEE_EXECUTED_OFFSET, 32)?)?;
+    if fee < 0 {
+        return Err(Error::MalformedMessage);
+    }
+    Ok(fee)
+}
+
+/// Stellar USDC has 7 decimals; CCTP messages carry 6. Circle's Stellar mint
+/// scales the message amount by this factor.
+pub const STELLAR_USDC_SCALE: i128 = 10;
+
+/// The USDC that actually reached the forward-to address, in Stellar's
+/// 7-decimal units: `(amount - fee_executed) * 10`. Pay out this, never
+/// [`amount`], or every deposit overpays from pooled funds.
+pub fn delivered_amount(message: &Bytes) -> Result<i128, Error> {
+    let net = amount(message)?
+        .checked_sub(fee_executed(message)?)
+        .ok_or(Error::MalformedMessage)?;
+    if net <= 0 {
+        return Err(Error::MalformedMessage);
+    }
+    net.checked_mul(STELLAR_USDC_SCALE).ok_or(Error::MalformedMessage)
 }
 
 /// The body's mintRecipient. For a Stellar-bound message Circle requires this

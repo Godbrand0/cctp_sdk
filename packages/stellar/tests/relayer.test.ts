@@ -14,14 +14,14 @@ const forwarderBytes = Buffer.from(StrKey.decodeContract(net.cctpForwarder));
 const u32 = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
 const word = (n: number) => Buffer.alloc(32, n);
 
-function message(opts: { destDomain?: number; mintRecipient?: Buffer; nonce?: number } = {}): `0x${string}` {
+function message(opts: { destDomain?: number; mintRecipient?: Buffer; destinationCaller?: Buffer; nonce?: number } = {}): `0x${string}` {
   const hook = encodeAttributedHookData({
     forwardTo: StrKey.encodeContract(Buffer.alloc(32, 9)),
     recipient: Keypair.random().publicKey(),
     minOut: 0n,
   });
   const amount = Buffer.alloc(32); amount.writeBigUInt64BE(5_000_000n, 24);
-  const header = Buffer.concat([u32(1), u32(3), u32(opts.destDomain ?? 27), word(opts.nonce ?? 0xaa), word(1), word(2), word(3), u32(1000), u32(2000)]);
+  const header = Buffer.concat([u32(1), u32(3), u32(opts.destDomain ?? 27), word(opts.nonce ?? 0xaa), word(1), word(2), opts.destinationCaller ?? forwarderBytes, u32(1000), u32(2000)]);
   const body = Buffer.concat([u32(1), word(4), opts.mintRecipient ?? forwarderBytes, amount, word(5), word(0), word(0), word(0)]);
   return ("0x" + Buffer.concat([header, body, hook]).toString("hex")) as `0x${string}`;
 }
@@ -36,12 +36,18 @@ class FakeInvoker implements SorobanInvoker {
     this.calls.push({ contractId, method });
     if (this.failMethods.has(method)) {
       if (this.usedAfterFailedMint) this.nonceUsed = true;
+      if (this.deliveredAfterFailedConsumer) this.delivered = true;
       return { hash: `fail-${method}`, ok: false, detail: "boom" };
     }
     if (method === "mint_and_forward") this.nonceUsed = true;
     return { hash: `tx-${method}`, ok: true };
   }
-  async read() { return this.nonceUsed; }
+  /** What the consumer's is_delivered returns; flips true when deliveredAfterFailedConsumer and the consumer fails. */
+  delivered = false;
+  deliveredAfterFailedConsumer = false;
+  async read(_contractId: string, method: string) {
+    return method === "is_delivered" ? this.delivered : this.nonceUsed;
+  }
   methods() { return this.calls.map((c) => c.method); }
 }
 
@@ -127,6 +133,48 @@ describe("StellarRelayer", () => {
     const invoker = new FakeInvoker();
     const r = new StellarRelayer({ network: net, invoker, attestations: { poll: async () => { throw new Error("timeout"); } }, consumer });
     await expect(r.relay(BURN, 3)).rejects.toMatchObject({ step: "attestation" });
+  });
+
+  it("rejects a destinationCaller that is not the forwarder before any call", async () => {
+    const invoker = new FakeInvoker();
+    const r = new StellarRelayer({ network: net, invoker, attestations: attestations(message({ destinationCaller: word(0xee) })), consumer });
+    await expect(r.relay(BURN, 3)).rejects.toMatchObject({ step: "validate" });
+    expect(invoker.calls).toHaveLength(0);
+  });
+
+  it("refuses a network without a MessageTransmitter", () => {
+    const invoker = new FakeInvoker();
+    expect(
+      () => new StellarRelayer({ network: { ...net, messageTransmitter: undefined }, invoker, attestations: attestations(message()) }),
+    ).toThrow(/messageTransmitter/);
+  });
+
+  const receiverConsumer = { ...consumer, method: "process", isDeliveredMethod: "is_delivered" };
+
+  it("skips the consumer when someone else already delivered", async () => {
+    const invoker = new FakeInvoker();
+    invoker.nonceUsed = true;
+    invoker.delivered = true;
+    const r = new StellarRelayer({ network: net, invoker, attestations: attestations(message()), consumer: receiverConsumer });
+    const res = await r.relay(BURN, 3);
+    expect(invoker.methods()).toEqual([]);
+    expect(res.status).toBe("complete");
+  });
+
+  it("treats a failed consumer call as success if a concurrent caller delivered", async () => {
+    const invoker = new FakeInvoker();
+    invoker.failMethods.add("process");
+    invoker.deliveredAfterFailedConsumer = true;
+    const r = new StellarRelayer({ network: net, invoker, attestations: attestations(message()), consumer: receiverConsumer });
+    const res = await r.relay(BURN, 3);
+    expect(res.status).toBe("complete");
+  });
+
+  it("still fails a consumer call when the consumer has not delivered", async () => {
+    const invoker = new FakeInvoker();
+    invoker.failMethods.add("process");
+    const r = new StellarRelayer({ network: net, invoker, attestations: attestations(message()), consumer: receiverConsumer });
+    await expect(r.relay(BURN, 3)).rejects.toMatchObject({ step: "consumer" });
   });
 
   it("works with no consumer (forwarder-only)", async () => {

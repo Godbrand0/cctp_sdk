@@ -29,8 +29,18 @@ counterpart of destination hooks in `@cctp-sdk/core`.
 A consumer must check, in order: the attestation, destination domain 27, that
 the forward-to address is itself, that the mint recipient is the forwarder,
 `is_nonce_used` on Circle's MessageTransmitter, and its own delivered-nonce map
-(recorded before paying out). The [`attested-receiver`](../../crates/attested-receiver)
-crate provides each check.
+(recorded before paying out). It must then pay `(amount - feeExecuted) * 10`:
+Stellar USDC has 7 decimals and the message carries 6. The
+[`attested-receiver`](../../crates/attested-receiver) crate provides each check,
+including the nonce record (`delivered::claim`).
+
+You don't have to write that contract yourself.
+[`cctp-receiver`](../../crates/cctp-receiver) is a ready-to-deploy consumer. It
+runs the checklist, records the nonce, and calls a pluggable action such as a
+swap or vault deposit. If the action fails or misses `min_out`, it sends the
+plain USDC to the attested recipient instead. Anyone can call it at any time
+with the message and attestation, so the relayer is a convenience, not a
+dependency.
 
 ## What's included
 
@@ -53,7 +63,7 @@ const relayer = new StellarRelayer({
   network: STELLAR_TESTNET,
   invoker: new RpcInvoker({ rpcUrl, passphrase: STELLAR_TESTNET.passphrase, signer: new KeypairSigner(secret) }),
   attestations: new IrisClient(IRIS_SANDBOX),
-  consumer: { contractId: MY_RECEIVER, method: "deliver" },
+  consumer: { contractId: MY_RECEIVER, method: "process", isDeliveredMethod: "is_delivered" },
 });
 await relayer.relay(burnTxHash, sourceDomain);
 ```
@@ -63,8 +73,11 @@ Not yet: source-side burn helpers, anchor memo attribution.
 ## Caveats
 
 - `STELLAR_MAINNET.cctpForwarder` comes from Circle's docs and has **not been verified on-chain** here.
-- The trailing hookData section is a convention, not part of Circle's spec. It relies on
-  `mint_and_forward` tolerating trailing bytes, observed on testnet only.
+- The trailing hookData section sits in the "optional integrator-defined payload" slot that
+  Circle's Stellar hookData format allows after `forwardRecipient`. Its layout (recipient + `min_out`)
+  is this package's convention.
+- The relayer requires `network.messageTransmitter`. `STELLAR_MAINNET` doesn't set one yet, so pass
+  it explicitly.
 - `RpcInvoker`, the live Soroban path, has not been run against a network yet. The relay logic is tested against a fake invoker only.
 - Recipients are restricted to `G...` and `C...` strkeys. Muxed (`M...`) and memo attribution are untested.
 

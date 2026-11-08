@@ -36,6 +36,13 @@ export interface ConsumerCall {
   method: string;
   /** Extra args after (message, attestation). Default: none. */
   extraArgs?: (message: CctpV2Message) => xdr.ScVal[];
+  /**
+   * Read-only method taking the 32-byte nonce and returning true once the
+   * consumer has delivered it (`is_delivered` on the `cctp-receiver`
+   * contract). When set, the relayer skips a delivery someone else already
+   * made instead of failing on it, the same way it treats the mint.
+   */
+  isDeliveredMethod?: string;
 }
 
 export interface RelayerConfig {
@@ -73,6 +80,11 @@ export class RelayError extends Error {
 export class StellarRelayer {
   private store: RelayStore;
   constructor(private cfg: RelayerConfig) {
+    // Without it the relayer can't tell "already minted" from "mint failed",
+    // so a resumed or raced relay would be reported as failed.
+    if (!cfg.network.messageTransmitter) {
+      throw new Error("network.messageTransmitter is required: the relayer reads is_nonce_used on it");
+    }
     this.store = cfg.store ?? new MemoryStore();
   }
 
@@ -118,7 +130,7 @@ export class StellarRelayer {
     }
 
     const consumer = this.cfg.consumer;
-    if (consumer && !record.consumerTx) {
+    if (consumer && !record.consumerTx && !(await this.consumerDelivered(message.nonce))) {
       const extra = consumer.extraArgs?.(message) ?? [];
       const res = await this.cfg.invoker.invoke(consumer.contractId, consumer.method, [
         messageArg,
@@ -126,7 +138,12 @@ export class StellarRelayer {
         ...extra,
       ]);
       record.consumerTx = res.hash;
-      if (!res.ok) return this.fail(burnTxHash, record, "consumer", res.detail ?? `${consumer.method} failed`);
+      if (!res.ok) {
+        // Someone else may have delivered it first; the consumer's record is authoritative.
+        if (!(await this.consumerDelivered(message.nonce))) {
+          return this.fail(burnTxHash, record, "consumer", res.detail ?? `${consumer.method} failed`);
+        }
+      }
       await this.store.set(burnTxHash, record);
     }
 
@@ -148,15 +165,26 @@ export class StellarRelayer {
       await bail(`message is for domain ${message.destinationDomain}, not Stellar (${this.cfg.network.domain})`);
     }
     // Circle requires mintRecipient and destinationCaller to be the forwarder itself.
-    const forwarder = bytesToHex(StrKey.decodeContract(this.cfg.network.cctpForwarder));
-    if (message.mintRecipient.toLowerCase() !== forwarder.toLowerCase()) {
+    const forwarder = bytesToHex(StrKey.decodeContract(this.cfg.network.cctpForwarder)).toLowerCase();
+    if (message.mintRecipient.toLowerCase() !== forwarder) {
       await bail("mintRecipient is not the configured CctpForwarder");
+    }
+    if (message.destinationCaller.toLowerCase() !== forwarder) {
+      await bail("destinationCaller is not the configured CctpForwarder");
     }
   }
 
+  private async consumerDelivered(nonce: `0x${string}`): Promise<boolean> {
+    const c = this.cfg.consumer;
+    if (!c?.isDeliveredMethod) return false;
+    const done = await this.cfg.invoker.read(c.contractId, c.isDeliveredMethod, [
+      nativeToScVal(hexToBytes(nonce), { type: "bytes" }),
+    ]);
+    return done === true;
+  }
+
   private async nonceUsed(nonce: `0x${string}`): Promise<boolean> {
-    const mt = this.cfg.network.messageTransmitter;
-    if (!mt) return false;
+    const mt = this.cfg.network.messageTransmitter!;
     const used = await this.cfg.invoker.read(mt, "is_nonce_used", [
       nativeToScVal(hexToBytes(nonce), { type: "bytes" }),
     ]);

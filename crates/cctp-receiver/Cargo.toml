@@ -1,0 +1,20 @@
+[package]
+name = "cctp-receiver"
+version = "0.0.1"
+edition = "2021"
+description = "Reference Soroban contract that delivers inbound CCTP V2 USDC per attested hookData, with replay protection and a fallback to the recipient"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+attested-receiver = { path = "../attested-receiver" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+k256 = { version = "0.13", features = ["ecdsa"] }
+sha3 = "0.10"
+ed25519-dalek = "=2.2.0"

@@ -17,8 +17,9 @@
 //!   forward-to address and the trailing `recipient + min_out` section (see
 //!   the `@cctp-sdk/stellar` npm package for the matching encoder).
 //!
-//! This crate holds no storage and no funds. A consumer's delivery function
-//! must, in this order:
+//! This crate holds no funds. Apart from [`delivered`], which writes to the
+//! calling contract's own storage, it holds no state either. A consumer's
+//! delivery function must, in this order:
 //!
 //! 1. [`attestation::verify`] the message.
 //! 2. [`message::require_destination_domain`] with 27 (Stellar).
@@ -27,8 +28,13 @@
 //! 4. [`message::require_mint_recipient`] with the CctpForwarder's id.
 //! 5. Check the nonce with `is_nonce_used` on Circle's MessageTransmitter,
 //!    which proves the mint happened.
-//! 6. Record the nonce in its own delivered map *before* paying out.
-//! 7. Read [`message::attributed_hook`] and act on it.
+//! 6. [`delivered::claim`] the nonce *before* paying out.
+//! 7. Read [`message::attributed_hook`] and act on it, paying
+//!    [`message::delivered_amount`] (`(amount - feeExecuted) * 10`, since
+//!    Stellar USDC has 7 decimals), never the raw message `amount`.
+//!
+//! The `cctp-receiver` contract in this workspace does all of this and can
+//! be deployed as is.
 //!
 //! Attester-set management and admin auth are also the consumer's job.
 //!
@@ -36,6 +42,7 @@
 //! internal audit found two critical bugs in this logic before it was fixed.
 
 pub mod attestation;
+pub mod delivered;
 pub mod message;
 
 use soroban_sdk::contracterror;
@@ -51,4 +58,5 @@ pub enum Error {
     WrongDestination = 103,
     WrongForwardTo = 104,
     WrongMintRecipient = 105,
+    AlreadyDelivered = 106,
 }

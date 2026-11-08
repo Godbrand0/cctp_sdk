@@ -1,7 +1,7 @@
-use attested_receiver::{attestation, message, Error};
+use attested_receiver::{attestation, delivered, message, Error};
 use k256::ecdsa::{RecoveryId, Signature, SigningKey};
 use sha3::{Digest, Keccak256};
-use soroban_sdk::{testutils::Address as _, Address, Bytes, BytesN, Env, Vec};
+use soroban_sdk::{contract, testutils::Address as _, Address, Bytes, BytesN, Env, Vec};
 
 const STRKEY_LEN: usize = 56;
 
@@ -301,4 +301,56 @@ fn parses_hookdata_produced_by_the_typescript_encoder() {
     let mut fw_buf = [0u8; STRKEY_LEN];
     fw.to_string().copy_into_slice(&mut fw_buf);
     assert_eq!(core::str::from_utf8(&fw_buf).unwrap(), "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR");
+}
+
+// ─── delivered amount ───────────────────────────────────────────────────
+
+fn with_fee(mut m: std::vec::Vec<u8>, fee: u128) -> std::vec::Vec<u8> {
+    m[328..344].copy_from_slice(&fee.to_be_bytes());
+    m
+}
+
+#[test]
+fn delivered_amount_subtracts_fee_and_scales_to_7_decimals() {
+    let env = Env::default();
+    let r = Address::generate(&env);
+    // 1.000000 USDC burned, 0.000130 fee -> 0.999870 minted = 9_998_700 stroop-units
+    let m = to_bytes(&env, &with_fee(build(&env, 27, 1, 1_000_000, &r, 0).bytes, 130));
+    assert_eq!(message::amount(&m), Ok(1_000_000));
+    assert_eq!(message::fee_executed(&m), Ok(130));
+    assert_eq!(message::delivered_amount(&m), Ok(9_998_700));
+    // no fee -> plain x10
+    let m = to_bytes(&env, &build(&env, 27, 1, 123_456, &r, 0).bytes);
+    assert_eq!(message::delivered_amount(&m), Ok(1_234_560));
+}
+
+#[test]
+fn delivered_amount_rejects_fee_at_or_above_amount() {
+    let env = Env::default();
+    let r = Address::generate(&env);
+    let eq = to_bytes(&env, &with_fee(build(&env, 27, 1, 500, &r, 0).bytes, 500));
+    assert_eq!(message::delivered_amount(&eq), Err(Error::MalformedMessage));
+    let over = to_bytes(&env, &with_fee(build(&env, 27, 1, 500, &r, 0).bytes, 501));
+    assert_eq!(message::delivered_amount(&over), Err(Error::MalformedMessage));
+}
+
+// ─── delivered nonces ───────────────────────────────────────────────────
+
+#[contract]
+struct Host;
+
+#[test]
+fn claim_records_a_nonce_once() {
+    let env = Env::default();
+    let host = env.register(Host, ());
+    let a = BytesN::from_array(&env, &[1; 32]);
+    let b = BytesN::from_array(&env, &[2; 32]);
+    env.as_contract(&host, || {
+        assert!(!delivered::is_delivered(&env, &a));
+        assert_eq!(delivered::claim(&env, &a), Ok(()));
+        assert!(delivered::is_delivered(&env, &a));
+        assert_eq!(delivered::claim(&env, &a), Err(Error::AlreadyDelivered));
+        // independent nonces don't interfere
+        assert_eq!(delivered::claim(&env, &b), Ok(()));
+    });
 }

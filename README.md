@@ -9,6 +9,7 @@ TypeScript tooling for Circle's [Cross-Chain Transfer Protocol (CCTP) v2](https:
 | [`@cctp-sdk/stellar`](packages/stellar) | 0.0.1 (pre-alpha) | Receive CCTP V2 USDC on Stellar: hookData codec, message parser, Iris client and a resumable relayer. |
 | [`@cctp-sdk/hardhat`](packages/hardhat-plugin) | 0.1.0 | Local test helpers: a mock attestation server and fork utilities. |
 | [`attested-receiver`](crates/attested-receiver) | crate | Soroban crate that verifies CCTP attestations and parses messages on-chain. |
+| [`cctp-receiver`](crates/cctp-receiver) | contract | Deployable Soroban receiver: verifies, records the nonce, runs an action or falls back to plain USDC. |
 | [`apps/web`](apps/web) | private | Next.js docs site with an interactive transfer simulator. |
 
 ## Quick start
@@ -45,7 +46,7 @@ pnpm --filter @cctp-sdk/web dev     # docs site
 pnpm example:transfer               # testnet transfer, needs .env (see .env.example)
 ```
 
-The Rust crate is a separate Cargo workspace in [`crates/`](crates): `cargo test` from that directory.
+The Rust crates are a separate Cargo workspace in [`crates/`](crates): `cargo test` from that directory.
 
 ## License
 

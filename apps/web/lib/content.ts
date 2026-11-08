@@ -39,7 +39,7 @@ export const packages = [
     version: "0.0.1",
     npm: "https://www.npmjs.com/package/@cctp-sdk/stellar",
     blurb:
-      "Receive CCTP V2 USDC on Stellar with a recipient bound inside Circle's attestation. hookData codec, message parser, Iris client and a resumable StellarRelayer. Pre-alpha.",
+      "Let a Soroban contract act on inbound CCTP V2 USDC for a specific user, using instructions inside Circle's attested message. hookData codec, message parser, Iris client and a resumable StellarRelayer. Pre-alpha.",
   },
   {
     name: "@cctp-sdk/hardhat",

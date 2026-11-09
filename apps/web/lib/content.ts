@@ -36,10 +36,10 @@ export const packages = [
   },
   {
     name: "@cctp-sdk/stellar",
-    version: "0.0.1",
+    version: "0.0.2",
     npm: "https://www.npmjs.com/package/@cctp-sdk/stellar",
     blurb:
-      "Let a Soroban contract act on inbound CCTP V2 USDC for a specific user, using instructions inside Circle's attested message. hookData codec, message parser, Iris client and a resumable StellarRelayer. Pre-alpha.",
+      "Let a Soroban contract act on inbound CCTP V2 USDC for a specific user, using instructions inside Circle's attested message. hookData codec, message parser, Iris client and a resumable, idempotent StellarRelayer. Pre-alpha.",
   },
   {
     name: "@cctp-sdk/hardhat",
@@ -49,9 +49,15 @@ export const packages = [
   },
   {
     name: "attested-receiver (Rust)",
-    version: "crate",
+    version: "0.0.3",
     blurb:
-      "Soroban crate that verifies CCTP attestations and parses messages on-chain. The on-chain half of the Stellar package.",
+      "Soroban crate that verifies CCTP attestations, parses messages, computes the delivered amount and records processed nonces. The on-chain half of the Stellar package.",
+  },
+  {
+    name: "cctp-receiver (Soroban)",
+    version: "contract",
+    blurb:
+      "Deployable receiver built on attested-receiver. Anyone can call process(message, attestation); it pays the attested recipient directly or through an action, and falls back to plain USDC if the action fails.",
   },
 ];
 
@@ -146,11 +152,19 @@ const { transfer, state, isLoading } = useTransfer();
 const { estimate } = useEstimateFee({ from, to, amount, fast: true });
 <TransferStatusBadge state={state} />`;
 
+export const receiverOutcomes = [
+  ["Delivered", "No action configured", "USDC sent to the recipient"],
+  ["Executed", "Action succeeds and pulls the full amount", "Action's output goes to the recipient"],
+  ["Fallback", "Action fails or misses min_out, or pulls less", "Action rolled back; USDC (or the remainder) sent to the recipient"],
+];
+
 export const stellarCode = `const relayer = new StellarRelayer({
   network: STELLAR_TESTNET,
   invoker: new RpcInvoker({ rpcUrl, passphrase: STELLAR_TESTNET.passphrase,
                             signer: new KeypairSigner(secret) }),
   attestations: new IrisClient(IRIS_SANDBOX),
-  consumer: { contractId: MY_RECEIVER, method: "deliver" },
+  // your deployed cctp-receiver
+  consumer: { contractId: RECEIVER, method: "process",
+              isDeliveredMethod: "is_delivered" },
 });
 await relayer.relay(burnTxHash, sourceDomain);`;

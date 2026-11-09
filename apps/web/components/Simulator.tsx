@@ -73,12 +73,12 @@ export function Simulator() {
   const code = isStellar
     ? `// 1. Burn on ${fromC[1]} with the recipient bound in hookData (your wallet)
 const hookData = encodeAttributedHookData({
-  forwardTo: CONSUMER_ID,
+  forwardTo: RECEIVER, // your cctp-receiver
   recipient: "G...",
   minOut: 0n,
 });
 
-// 2. Attest, mint_and_forward, then call your contract
+// 2. Attest, mint_and_forward, then RECEIVER.process(message, attestation)
 await relayer.relay(burnTxHash, ${fromC[3]});`
     : `const transfer = await client.transfer(
   { from: "${from}", to: "${to}", amount: parseUnits("${Number(amount) > 0 ? amount : "0"}", 6)${fast ? ", fast: true" : ""} },
@@ -145,7 +145,7 @@ await relayer.relay(burnTxHash, ${fromC[3]});`
       </div>
       <p className="sim-note">
         Simulated in your browser. No wallet, network or Circle API is touched, and hashes are made up.
-        {isStellar ? " On Stellar the source-side burn is done from your own wallet, because burn helpers for Stellar aren't shipped yet. The relayer takes it from the burn transaction." : fast ? " Fast lane attests in seconds." : " Standard transfers wait for source-chain finality, which takes minutes on a real network."}
+        {isStellar ? " On Stellar the source-side burn is done from your own wallet, because burn helpers for Stellar aren't shipped yet. The relayer takes it from the burn transaction, and anyone can call process() if it doesn't." : fast ? " Fast lane attests in seconds." : " Standard transfers wait for source-chain finality, which takes minutes on a real network."}
       </p>
     </section>
   );

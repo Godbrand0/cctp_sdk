@@ -7,7 +7,7 @@ import { Simulator } from "../components/Simulator";
 import { HookDataDiagram } from "../components/HookDataDiagram";
 import {
   manualSteps, packages, params,
-  quickStart, resumeCode, hookCode, feeCode, reactCode, stellarCode,
+  quickStart, resumeCode, hookCode, feeCode, reactCode, stellarCode, receiverOutcomes,
 } from "../lib/content";
 
 const toc: [string, string][] = [
@@ -35,7 +35,7 @@ const features: { id: string; title: string; body: React.ReactNode; code?: strin
   {
     id: "hooks",
     title: "Destination hooks",
-    body: <>CCTP v2 carries hookData but never runs it. A hook executor contract on the destination is both the mint recipient and the only allowed caller, so the hook runs in the same transaction and a relayer can’t swap in its own instructions. If the hook reverts, USDC goes back to the sender. A transfer with a hook and no executor fails with <code>HOOK_EXECUTOR_REQUIRED</code> instead of silently minting plain USDC.</>,
+    body: <>CCTP v2 carries hookData but never runs it. A hook executor contract on the destination is both the mint recipient and the only allowed caller, so the hook runs in the same transaction and a relayer can’t swap in its own instructions. What happens if the hook reverts is up to the executor; the reference one in Conduit refunds the sender. A transfer with a hook and no executor fails with <code>HOOK_EXECUTOR_REQUIRED</code> instead of silently minting plain USDC.</>,
     code: hookCode,
   },
   {
@@ -130,14 +130,33 @@ export default function Home() {
               the attested message.
             </p>
             <HookDataDiagram />
+            <h3>The receiver contract</h3>
+            <p>
+              You don’t have to write that contract. Deploy <code>cctp-receiver</code> and use its
+              address as the forwarding address. After the mint, anyone can call{" "}
+              <code>process(message, attestation)</code>, straight away or later. The contract checks
+              the attestation, that the message is for Stellar, was forwarded to itself and was
+              minted, then records the nonce so the deposit can’t be paid twice. It pays{" "}
+              <code>(amount − feeExecuted) × 10</code>, because Stellar USDC has 7 decimals and the
+              message carries 6. A call that fails changes nothing, so it can be retried.
+            </p>
+            <Table head={["Outcome", "When", "Where the USDC goes"]} rows={receiverOutcomes} />
+            <p>
+              A failing action can’t strand a deposit: the user gets plain USDC instead. Two cases
+              still can: a <code>G...</code> recipient with no USDC trustline (retry once they add
+              one) and a burn with malformed trailing hookData (no recovery yet). The relayer below
+              automates the calls, but nothing depends on it.
+            </p>
             <Code>{stellarCode}</Code>
             <div className="callout">
               <h3>Pre-alpha: not verified yet</h3>
               <ul>
                 <li>The mainnet forwarder address comes from Circle’s docs and hasn’t been checked on-chain.</li>
-                <li>The trailing hookData section is a convention, seen working on testnet only.</li>
+                <li><code>cctp-receiver</code> is tested against mock Circle contracts only, not yet on testnet.</li>
+                <li>The relayer needs a MessageTransmitter address; the mainnet one isn’t set yet.</li>
                 <li>The live Soroban path (<code>RpcInvoker</code>) hasn’t run against a network.</li>
-                <li>The Rust crate hasn’t had an external audit.</li>
+                <li>The receiver’s admin is fully trusted: it sets the attester list and the action.</li>
+                <li>Neither the Rust crate nor the contract has had an external audit.</li>
               </ul>
             </div>
           </section>

@@ -13,8 +13,9 @@
 //!
 //! If the action fails for any reason (including its `min_out` floor not
 //! being met), its state changes are rolled back and the plain USDC goes to
-//! the attested recipient instead. A deposit therefore never gets stuck in
-//! this contract once it has been minted.
+//! the attested recipient instead, so a failing action can't strand a
+//! deposit. A message that can't be processed at all still leaves its USDC
+//! here: see "Known gaps" in the README.
 //!
 //! **Status: unaudited.**
 

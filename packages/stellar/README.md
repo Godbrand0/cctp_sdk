@@ -38,7 +38,8 @@ You don't have to write that contract yourself.
 [`cctp-receiver`](../../crates/cctp-receiver) is a ready-to-deploy consumer. It
 runs the checklist, records the nonce, and calls a pluggable action such as a
 swap or vault deposit. If the action fails or misses `min_out`, it sends the
-plain USDC to the attested recipient instead. Anyone can call it at any time
+plain USDC to the attested recipient instead (a malformed hookData section
+still can't be processed, see its README). Anyone can call it at any time
 with the message and attestation, so the relayer is a convenience, not a
 dependency.
 
@@ -49,7 +50,7 @@ dependency.
 | `encodeAttributedHookData` / `parseAttributedHookData` | Build and read the hookData layout |
 | `parseCctpV2Message` | Decode a CCTP V2 burn message (header, body, hookData) |
 | `STELLAR_TESTNET` / `STELLAR_MAINNET` | Contract addresses and domain (27) |
-| `StellarRelayer` | Poll attestation, call `mint_and_forward`, then an optional consumer contract. Resumable and idempotent; validates domain and mint recipient before spending any fee |
+| `StellarRelayer` | Poll attestation, call `mint_and_forward`, then an optional consumer contract. Resumable and idempotent; validates domain, mint recipient and destination caller before spending any fee |
 | `Signer` / `KeypairSigner` | Pluggable signing. Implement `Signer` against a KMS for real funds |
 | `RelayStore` / `MemoryStore` | Persist progress so a crash resumes instead of repeating a step |
 | `IrisClient` | Minimal attestation poller; `AttestationClient` from `@cctp-sdk/core` also works |

@@ -37,7 +37,8 @@ For example, calling before the mint returns `NotMinted`, and calling again once
 | Action fails, or its `min_out` floor isn't met | Action rolled back; USDC sent to the recipient | `Fallback` |
 | Action succeeds but pulls less than the amount | Remainder sent to the recipient | `Fallback` |
 
-Once a message has been minted and processed, the USDC can't end up stuck in this contract.
+A failing action can't strand a deposit: the user gets plain USDC instead. That covers the action only. The cases
+below can still leave USDC in this contract.
 
 ## Action interface
 
@@ -51,8 +52,21 @@ it can't deliver at least `min_out`**. The receiver can't check the output asset
 
 ## Admin
 
-`set_attesters` (mirror Circle's attester set), `set_action`, `set_admin`. The admin can choose the action contract,
-so the admin is trusted with funds that pass through it. The admin can't redirect a delivery that falls back.
+`set_attesters` (mirror Circle's attester set), `set_action`, `set_admin`. **The admin is fully trusted with every
+balance this contract holds.** Through `set_attesters` the admin could approve its own key, sign a forged message
+and drain the pool. Through `set_action` it could route payouts to a contract it controls. Use a multisig or a
+contract you govern as the admin.
+
+## Known gaps
+
+| Case | Effect |
+|---|---|
+| Recipient is a `G...` account with no USDC trustline | `process` fails until the recipient adds one, then succeeds on retry |
+| Trailing hookData missing or malformed, or recipient is a muxed `M...` address | `process` fails with `MalformedMessage` every time; the USDC stays here and there is no recovery path yet |
+| Admin key compromised | See Admin above |
+
+Planned: read the attester set from Circle's MessageTransmitter instead of storing it, and an admin-gated recovery
+for messages that are attested and minted but can't be processed.
 
 ## Deploy
 

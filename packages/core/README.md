@@ -160,8 +160,8 @@ only mint USDC. The executor closes that gap: the SDK sets it as the burn's
 `destinationCaller` (so nobody can relay the message without the hook running in the
 same transaction). At relay time the SDK calls `relayAndExecute(message, attestation)`
 on the executor, which mints the USDC via `receiveMessage`, decodes the hook from the
-attested message — a relayer cannot substitute its own instructions — and executes it,
-refunding USDC to the sender if the hook call reverts.
+attested message — a relayer cannot substitute its own instructions — and executes it.
+What happens if the hook call reverts is up to the executor; the reference one refunds USDC to the sender.
 
 The executor interface is exported as `HOOK_EXECUTOR_ABI`. A reference implementation
 (`ReceiveAndSwap.sol`) lives in the [Conduit](https://github.com/Godbrand0/conduit) repo.

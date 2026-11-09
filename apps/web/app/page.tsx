@@ -7,7 +7,7 @@ import { Simulator } from "../components/Simulator";
 import { HookDataDiagram } from "../components/HookDataDiagram";
 import {
   manualSteps, packages, params,
-  quickStart, resumeCode, hookCode, feeCode, reactCode, stellarCode,
+  quickStart, resumeCode, hookCode, feeCode, reactCode, stellarCode, receiverOutcomes,
 } from "../lib/content";
 
 const toc: [string, string][] = [
@@ -130,14 +130,30 @@ export default function Home() {
               the attested message.
             </p>
             <HookDataDiagram />
+            <h3>The receiver contract</h3>
+            <p>
+              You don’t have to write that contract. Deploy <code>cctp-receiver</code> and use its
+              address as the forwarding address. After the mint, anyone can call{" "}
+              <code>process(message, attestation)</code>, straight away or later. The contract checks
+              the attestation, that the message is for Stellar, was forwarded to itself and was
+              minted, then records the nonce so the deposit can’t be paid twice. It pays{" "}
+              <code>(amount − feeExecuted) × 10</code>, because Stellar USDC has 7 decimals and the
+              message carries 6. A call that fails changes nothing, so it can be retried.
+            </p>
+            <Table head={["Outcome", "When", "Where the USDC goes"]} rows={receiverOutcomes} />
+            <p>
+              Once a deposit is minted it can’t get stuck in the contract. The relayer below
+              automates the calls, but nothing depends on it.
+            </p>
             <Code>{stellarCode}</Code>
             <div className="callout">
               <h3>Pre-alpha: not verified yet</h3>
               <ul>
                 <li>The mainnet forwarder address comes from Circle’s docs and hasn’t been checked on-chain.</li>
-                <li>The trailing hookData section is a convention, seen working on testnet only.</li>
+                <li><code>cctp-receiver</code> is tested against mock Circle contracts only, not yet on testnet.</li>
+                <li>The relayer needs a MessageTransmitter address; the mainnet one isn’t set yet.</li>
                 <li>The live Soroban path (<code>RpcInvoker</code>) hasn’t run against a network.</li>
-                <li>The Rust crate hasn’t had an external audit.</li>
+                <li>Neither the Rust crate nor the contract has had an external audit.</li>
               </ul>
             </div>
           </section>

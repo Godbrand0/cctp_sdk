@@ -8,7 +8,7 @@ export function HookDataDiagram() {
       </div>
       <div className="hd-labels">
         <p className="hd-forwarder-l"><strong>CctpForwarder reads this</strong> and mints USDC to the forwarding address.</p>
-        <p className="hd-trailing-l"><strong>Your Soroban contract reads this</strong> from the same attested message and acts for that user. The forwarder ignores it.</p>
+        <p className="hd-trailing-l"><strong>Your Soroban contract reads this</strong> from the same attested message and acts for that user. It sits in the slot Circle’s format reserves for integrator data, so the forwarder ignores it.</p>
       </div>
     </figure>
   );

@@ -354,3 +354,41 @@ fn claim_records_a_nonce_once() {
         assert_eq!(delivered::claim(&env, &b), Ok(()));
     });
 }
+
+// ─── verify_with / strkey validation ────────────────────────────────────
+
+#[test]
+fn verify_with_uses_the_lookup() {
+    let env = Env::default();
+    let keys = [attester(1), attester(2)];
+    let r = Address::generate(&env);
+    let m = build(&env, 27, 1, 1, &r, 0).bytes;
+    let bytes = to_bytes(&env, &m);
+    let att = attest(&env, &keys, &m);
+    let known = set(&env, &keys);
+    assert_eq!(attestation::verify_with(&env, &bytes, &att, 2, |a| known.contains(a)), Ok(()));
+    assert_eq!(attestation::verify_with(&env, &bytes, &att, 2, |_| false), Err(Error::InvalidAttestation));
+    assert_eq!(attestation::verify_with(&env, &bytes, &att, 0, |_| true), Err(Error::InvalidConfig));
+}
+
+#[test]
+fn bad_recipient_strkey_is_an_error_not_a_trap() {
+    let env = Env::default();
+    let r = Address::generate(&env);
+    let good = build(&env, 27, 1, 1, &r, 0).bytes;
+    // recipient strkey starts after: 376 + 32 + 56 (forward-to) + 4 (len)
+    let at = 376 + 32 + 56 + 4 + 10;
+
+    // one character changed: checksum no longer matches
+    let mut typo = good.clone();
+    typo[at] = if typo[at] == b'A' { b'B' } else { b'A' };
+    assert!(matches!(message::attributed_hook(&env, &to_bytes(&env, &typo)), Err(Error::MalformedMessage)));
+
+    // not base32 at all
+    let mut junk = good.clone();
+    junk[at] = b'1';
+    assert!(matches!(message::attributed_hook(&env, &to_bytes(&env, &junk)), Err(Error::MalformedMessage)));
+
+    // the untouched message still parses
+    assert!(message::attributed_hook(&env, &to_bytes(&env, &good)).is_ok());
+}

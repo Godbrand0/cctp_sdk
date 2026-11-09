@@ -30,6 +30,22 @@ pub fn verify(
     threshold: u32,
 ) -> Result<(), Error> {
     validate_config(attesters, threshold)?;
+    verify_with(env, message, attestation, threshold, |a| attesters.contains(a))
+}
+
+/// [`verify`] against an attester set you look up rather than store, e.g.
+/// `is_enabled_attester` on Circle's own Stellar MessageTransmitter, so the
+/// set follows Circle's rotations and no admin can swap in its own key.
+pub fn verify_with(
+    env: &Env,
+    message: &Bytes,
+    attestation: &Bytes,
+    threshold: u32,
+    is_attester: impl Fn(&BytesN<20>) -> bool,
+) -> Result<(), Error> {
+    if threshold == 0 {
+        return Err(Error::InvalidConfig);
+    }
     if attestation.len() != threshold * SIGNATURE_LENGTH {
         return Err(Error::InvalidAttestation);
     }
@@ -46,7 +62,7 @@ pub fn verify(
                 return Err(Error::InvalidAttestation);
             }
         }
-        if !attesters.contains(&recovered) {
+        if !is_attester(&recovered) {
             return Err(Error::InvalidAttestation);
         }
         previous = Some(recovered);

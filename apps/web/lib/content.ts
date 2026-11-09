@@ -49,7 +49,7 @@ export const packages = [
   },
   {
     name: "attested-receiver (Rust)",
-    version: "0.0.3",
+    version: "0.0.4",
     blurb:
       "Soroban crate that verifies CCTP attestations, parses messages, computes the delivered amount and records processed nonces. The on-chain half of the Stellar package.",
   },

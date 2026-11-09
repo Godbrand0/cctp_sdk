@@ -6,23 +6,24 @@
 //! (a relayer, the user, a keeper) calls [`Receiver::process`] with the same
 //! message and attestation, at any time, and the contract:
 //!
-//! 1. runs every check from the `attested-receiver` checklist,
+//! 1. runs every check from the `attested-receiver` checklist, verifying the
+//!    attestation against the attester set on Circle's own MessageTransmitter,
 //! 2. records the nonce so the deposit can never be paid twice,
 //! 3. pays `(amount - feeExecuted) * 10` to the attested recipient, either
 //!    through the configured action contract or directly.
 //!
 //! If the action fails for any reason (including its `min_out` floor not
 //! being met), its state changes are rolled back and the plain USDC goes to
-//! the attested recipient instead, so a failing action can't strand a
-//! deposit. A message that can't be processed at all still leaves its USDC
-//! here: see "Known gaps" in the README.
+//! the attested recipient instead. If the hookData's recipient section is
+//! missing or malformed, so the message can never be processed, the admin
+//! can [`Receiver::recover`] it. Nothing else lets the admin move funds.
 //!
 //! **Status: unaudited.**
 
 use attested_receiver::{attestation, delivered, message, Error};
 use soroban_sdk::{
     contract, contractclient, contractimpl, contracttype, panic_with_error, symbol_short, token,
-    vec, Address, Bytes, BytesN, Env, IntoVal, Symbol, Vec,
+    Address, Bytes, BytesN, Env,
 };
 
 /// Stellar's CCTP domain.
@@ -39,6 +40,15 @@ pub const STELLAR_DOMAIN: u32 = 27;
 #[contractclient(name = "ActionClient")]
 pub trait Action {
     fn execute(env: Env, from: Address, recipient: Address, amount: i128, min_out: i128);
+}
+
+/// The parts of Circle's Stellar MessageTransmitter this contract reads.
+/// Signatures match the deployed contract's interface.
+#[contractclient(name = "TransmitterClient")]
+pub trait Transmitter {
+    fn is_nonce_used(env: Env, nonce: BytesN<32>) -> bool;
+    fn is_enabled_attester(env: Env, attester: BytesN<20>) -> bool;
+    fn get_signature_threshold(env: Env) -> Option<u32>;
 }
 
 #[contracttype]
@@ -59,10 +69,9 @@ pub struct Config {
     pub usdc: Address,
     /// Circle's CctpForwarder contract id (the message's mintRecipient).
     pub forwarder: BytesN<32>,
-    /// Circle's MessageTransmitter, asked whether the nonce was minted.
+    /// Circle's MessageTransmitter: source of the attester set and threshold,
+    /// and asked whether the nonce was minted.
     pub message_transmitter: Address,
-    pub attesters: Vec<BytesN<20>>,
-    pub threshold: u32,
     pub action: Option<Address>,
 }
 
@@ -71,13 +80,15 @@ enum Key {
     Config,
 }
 
-/// Defined here rather than in `attested-receiver` because only a contract
-/// that asks the MessageTransmitter can raise it.
+/// Errors only this contract raises. Codes from `attested-receiver` start
+/// at 100, so these don't collide.
 #[soroban_sdk::contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ReceiverError {
     /// The attested message hasn't been minted yet (or never will be).
     NotMinted = 1,
+    /// `recover` was called on a message that `process` can handle.
+    Processable = 2,
 }
 
 const INSTANCE_TTL_THRESHOLD: u32 = 500_000;
@@ -88,21 +99,15 @@ pub struct Receiver;
 
 #[contractimpl]
 impl Receiver {
-    #[allow(clippy::too_many_arguments)]
     pub fn __constructor(
         env: Env,
         admin: Address,
         usdc: Address,
         forwarder: BytesN<32>,
         message_transmitter: Address,
-        attesters: Vec<BytesN<20>>,
-        threshold: u32,
         action: Option<Address>,
     ) {
-        if let Err(e) = attestation::validate_config(&attesters, threshold) {
-            panic_with_error!(&env, e);
-        }
-        let config = Config { admin, usdc, forwarder, message_transmitter, attesters, threshold, action };
+        let config = Config { admin, usdc, forwarder, message_transmitter, action };
         env.storage().instance().set(&Key::Config, &config);
     }
 
@@ -113,32 +118,15 @@ impl Receiver {
     pub fn process(env: Env, message: Bytes, attestation: Bytes) -> Result<Outcome, Error> {
         let config = config(&env);
         let me = env.current_contract_address();
+        let nonce = authenticate(&env, &config, &message, &attestation)?;
 
-        // Checklist steps 1-4: authentic, for Stellar, sent to us, via the forwarder.
-        attestation::verify(&env, &message, &attestation, &config.attesters, config.threshold)?;
-        message::require_destination_domain(&message, STELLAR_DOMAIN)?;
-        message::require_forward_to(&env, &message, &me)?;
-        message::require_mint_recipient(&message, &config.forwarder)?;
-
-        // Step 5: the mint happened, so the USDC is really here.
-        let nonce = message::nonce(&message)?;
-        let used: bool = env.invoke_contract(
-            &config.message_transmitter,
-            &Symbol::new(&env, "is_nonce_used"),
-            vec![&env, nonce.clone().into_val(&env)],
-        );
-        if !used {
-            panic_with_error!(&env, ReceiverError::NotMinted);
-        }
-
-        // Step 6: before any transfer.
-        delivered::claim(&env, &nonce)?;
-
-        // Step 7.
+        // Read the instructions before claiming, so a malformed message
+        // stays unclaimed and can still be recovered.
         let hook = message::attributed_hook(&env, &message)?;
         let amount = message::delivered_amount(&message)?;
-        let usdc = token::TokenClient::new(&env, &config.usdc);
+        delivered::claim(&env, &nonce)?;
 
+        let usdc = token::TokenClient::new(&env, &config.usdc);
         let outcome = match &config.action {
             None => {
                 usdc.transfer(&me, &hook.recipient, &amount);
@@ -171,22 +159,30 @@ impl Receiver {
         Ok(outcome)
     }
 
+    /// Admin-only escape hatch for a message that is genuine, minted to this
+    /// contract and undelivered, but whose recipient section is missing or
+    /// malformed, so `process` can never succeed. Sends its delivered amount
+    /// to `to` and records the nonce. Refuses any message `process` can
+    /// handle, so it can't be used to redirect a normal deposit.
+    pub fn recover(env: Env, message: Bytes, attestation: Bytes, to: Address) -> Result<i128, Error> {
+        let config = admin_config(&env);
+        let nonce = authenticate(&env, &config, &message, &attestation)?;
+        if message::attributed_hook(&env, &message).is_ok() {
+            panic_with_error!(&env, ReceiverError::Processable);
+        }
+        let amount = message::delivered_amount(&message)?;
+        delivered::claim(&env, &nonce)?;
+        token::TokenClient::new(&env, &config.usdc).transfer(&env.current_contract_address(), &to, &amount);
+        env.events().publish((symbol_short!("recovered"), nonce), (to, amount));
+        Ok(amount)
+    }
+
     pub fn is_delivered(env: Env, nonce: BytesN<32>) -> bool {
         delivered::is_delivered(&env, &nonce)
     }
 
     pub fn config(env: Env) -> Config {
         config(&env)
-    }
-
-    /// Mirror a change to Circle's attester set.
-    pub fn set_attesters(env: Env, attesters: Vec<BytesN<20>>, threshold: u32) -> Result<(), Error> {
-        let mut c = admin_config(&env);
-        attestation::validate_config(&attesters, threshold)?;
-        c.attesters = attesters;
-        c.threshold = threshold;
-        env.storage().instance().set(&Key::Config, &c);
-        Ok(())
     }
 
     pub fn set_action(env: Env, action: Option<Address>) {
@@ -200,6 +196,23 @@ impl Receiver {
         c.admin = admin;
         env.storage().instance().set(&Key::Config, &c);
     }
+}
+
+/// Checklist steps 1-5: authentic (per Circle's live attester set), for
+/// Stellar, forwarded to this contract, via the forwarder, and minted.
+/// Returns the nonce.
+fn authenticate(env: &Env, config: &Config, message: &Bytes, attestation: &Bytes) -> Result<BytesN<32>, Error> {
+    let mt = TransmitterClient::new(env, &config.message_transmitter);
+    let threshold = mt.get_signature_threshold().ok_or(Error::InvalidConfig)?;
+    attestation::verify_with(env, message, attestation, threshold, |a| mt.is_enabled_attester(a))?;
+    message::require_destination_domain(message, STELLAR_DOMAIN)?;
+    message::require_forward_to(env, message, &env.current_contract_address())?;
+    message::require_mint_recipient(message, &config.forwarder)?;
+    let nonce = message::nonce(message)?;
+    if !mt.is_nonce_used(&nonce) {
+        panic_with_error!(env, ReceiverError::NotMinted);
+    }
+    Ok(nonce)
 }
 
 fn config(env: &Env) -> Config {

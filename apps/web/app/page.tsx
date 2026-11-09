@@ -144,7 +144,7 @@ export default function Home() {
             <p>
               A failing action can’t strand a deposit: the user gets plain USDC instead. Two cases
               still can: a <code>G...</code> recipient with no USDC trustline (retry once they add
-              one) and a burn with malformed trailing hookData (no recovery yet). The relayer below
+              one) and a burn with malformed trailing hookData (the admin can recover it). The relayer below
               automates the calls, but nothing depends on it.
             </p>
             <Code>{stellarCode}</Code>
@@ -155,7 +155,7 @@ export default function Home() {
                 <li><code>cctp-receiver</code> is tested against mock Circle contracts only, not yet on testnet.</li>
                 <li>The relayer needs a MessageTransmitter address; the mainnet one isn’t set yet.</li>
                 <li>The live Soroban path (<code>RpcInvoker</code>) hasn’t run against a network.</li>
-                <li>The receiver’s admin is fully trusted: it sets the attester list and the action.</li>
+                <li>The receiver’s admin picks the action contract, which handles every payout, so it’s trusted for that choice. Attesters are read from Circle’s contract, not set by the admin.</li>
                 <li>Neither the Rust crate nor the contract has had an external audit.</li>
               </ul>
             </div>

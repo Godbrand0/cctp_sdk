@@ -21,7 +21,9 @@
 //! calling contract's own storage, it holds no state either. A consumer's
 //! delivery function must, in this order:
 //!
-//! 1. [`attestation::verify`] the message.
+//! 1. [`attestation::verify`] the message, or [`attestation::verify_with`]
+//!    against Circle's MessageTransmitter (`is_enabled_attester`,
+//!    `get_signature_threshold`) so no admin controls the attester set.
 //! 2. [`message::require_destination_domain`] with 27 (Stellar).
 //! 3. [`message::require_forward_to`] with its own address. Otherwise a valid
 //!    message whose USDC went elsewhere is paid out of other users' funds.
@@ -36,7 +38,8 @@
 //! The `cctp-receiver` contract in this workspace does all of this and can
 //! be deployed as is.
 //!
-//! Attester-set management and admin auth are also the consumer's job.
+//! Admin auth is the consumer's job, as is the attester set if it uses
+//! [`attestation::verify`] rather than [`attestation::verify_with`].
 //!
 //! **Status: unaudited.** Ported from Conduit's `swap_and_deliver`, whose own
 //! internal audit found two critical bugs in this logic before it was fixed.

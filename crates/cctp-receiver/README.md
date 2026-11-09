@@ -17,13 +17,17 @@ user named in the attested hookData. It is built on [`attested-receiver`](../att
 
 | Step | Check | Error |
 |---|---|---|
-| 1 | Attestation is a threshold of the configured attesters | `InvalidAttestation` (101) |
+| 1 | Attestation meets the threshold of attesters enabled on Circle's MessageTransmitter (read live) | `InvalidAttestation` (101), `InvalidConfig` (102) if Circle reports no threshold |
 | 2 | Destination domain is 27 | `WrongDestination` (103) |
 | 3 | Forward-to address is this contract | `WrongForwardTo` (104) |
 | 4 | Mint recipient is Circle's CctpForwarder | `WrongMintRecipient` (105) |
 | 5 | `is_nonce_used` on Circle's MessageTransmitter (the mint happened) | `NotMinted` (1) |
-| 6 | Nonce not already delivered here; record it | `AlreadyDelivered` (106) |
-| 7 | Pay `(amount - feeExecuted) * 10` (Stellar USDC has 7 decimals) | |
+| 6 | Read the recipient and `min_out` from the hookData | `MalformedMessage` (100) |
+| 7 | Nonce not already delivered here; record it | `AlreadyDelivered` (106) |
+| 8 | Pay `(amount - feeExecuted) * 10` (Stellar USDC has 7 decimals) | |
+
+The attester set and threshold come from Circle's own MessageTransmitter on every call. They follow Circle's
+rotations automatically, and no admin can add a key.
 
 Any failed step reverts the whole call, nonce record included, so the call can be retried after the cause is fixed.
 For example, calling before the mint returns `NotMinted`, and calling again once the mint has happened succeeds.
@@ -37,8 +41,15 @@ For example, calling before the mint returns `NotMinted`, and calling again once
 | Action fails, or its `min_out` floor isn't met | Action rolled back; USDC sent to the recipient | `Fallback` |
 | Action succeeds but pulls less than the amount | Remainder sent to the recipient | `Fallback` |
 
-A failing action can't strand a deposit: the user gets plain USDC instead. That covers the action only. The cases
-below can still leave USDC in this contract.
+A failing action can't strand a deposit: the user gets plain USDC instead.
+
+## Recovery
+
+`recover(message, attestation, to)` is admin-only and exists for one case: a message that is genuine, minted to this
+contract and undelivered, but whose recipient section is missing or malformed (including a muxed `M...` recipient or
+a mistyped strkey), so `process` can never succeed. It runs the same checks 1-5, refuses any message `process` can
+handle (`Processable`, error 2), records the nonce and sends the delivered amount to `to`. A normal deposit can't be
+redirected through it.
 
 ## Action interface
 
@@ -52,29 +63,27 @@ it can't deliver at least `min_out`**. The receiver can't check the output asset
 
 ## Admin
 
-`set_attesters` (mirror Circle's attester set), `set_action`, `set_admin`. **The admin is fully trusted with every
-balance this contract holds.** Through `set_attesters` the admin could approve its own key, sign a forged message
-and drain the pool. Through `set_action` it could route payouts to a contract it controls. Use a multisig or a
-contract you govern as the admin.
+`set_action`, `set_admin`, `recover`. The admin can't touch the attester set or redirect a normal deposit. It is
+still trusted in two ways: the action contract it picks receives every payout first, so a malicious action could
+take funds, and it chooses where recovered funds go. Use a multisig or a contract you govern as the admin, and an
+action contract you've reviewed.
 
 ## Known gaps
 
 | Case | Effect |
 |---|---|
 | Recipient is a `G...` account with no USDC trustline | `process` fails until the recipient adds one, then succeeds on retry |
-| Trailing hookData missing or malformed, or recipient is a muxed `M...` address | `process` fails with `MalformedMessage` every time; the USDC stays here and there is no recovery path yet |
-| Admin key compromised | See Admin above |
-
-Planned: read the attester set from Circle's MessageTransmitter instead of storing it, and an admin-gated recovery
-for messages that are attested and minted but can't be processed.
+| Trailing hookData missing or malformed, or recipient is a muxed `M...` address | `process` fails with `MalformedMessage`; the admin can `recover` it |
+| Recipient never adds a trustline | Stays here: `recover` refuses a message `process` could handle |
+| Admin key compromised | It can set a malicious action, which would take later payouts (see Admin) |
 
 ## Deploy
 
 ```bash
 cargo build -p cctp-receiver --target wasm32v1-none --release
-stellar contract deploy --wasm target/wasm32v1-none/release/cctp_receiver.wasm -- \
+stellar contract deploy --wasm target/wasm32v1-none/release/cctp_receiver.wasm --source <identity> --network testnet -- \
   --admin <G...> --usdc <USDC SAC> --forwarder <CctpForwarder id, 32-byte hex> \
-  --message_transmitter <C...> --attesters '["<20-byte hex>", ...]' --threshold <n>
+  --message_transmitter <C...>
 ```
 
 Relay with `@cctp-sdk/stellar`:

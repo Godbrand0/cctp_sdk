@@ -39,7 +39,7 @@ You don't have to write that contract yourself.
 runs the checklist, records the nonce, and calls a pluggable action such as a
 swap or vault deposit. If the action fails or misses `min_out`, it sends the
 plain USDC to the attested recipient instead (a malformed hookData section
-still can't be processed, see its README). Anyone can call it at any time
+can't be processed; the admin can recover it, see its README). Anyone can call it at any time
 with the message and attestation, so the relayer is a convenience, not a
 dependency.
 

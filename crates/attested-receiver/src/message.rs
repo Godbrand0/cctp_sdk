@@ -162,7 +162,56 @@ fn read_strkey(env: &Env, b: &Bytes) -> Result<Address, Error> {
     }
     let mut buf = [0u8; STRKEY_LENGTH as usize];
     b.copy_into_slice(&mut buf);
+    // Address::from_string traps on a bad strkey, and a trap can't be
+    // handled, so a typo in the hookData would make the message impossible
+    // to process *or* recover. Validate first and return an error instead.
+    validate_strkey(&buf)?;
     Ok(Address::from_string(&String::from_bytes(env, &buf)))
+}
+
+/// Strkey version bytes for account (G...) and contract (C...) addresses.
+const VERSION_ACCOUNT: u8 = 6 << 3;
+const VERSION_CONTRACT: u8 = 2 << 3;
+
+/// Check a 56-character strkey: base32 alphabet, a G or C version byte and
+/// the CRC16-XModem checksum.
+fn validate_strkey(s: &[u8; STRKEY_LENGTH as usize]) -> Result<(), Error> {
+    // 56 chars * 5 bits = 35 bytes: version(1) + payload(32) + checksum(2).
+    let mut raw = [0u8; 35];
+    let (mut acc, mut bits, mut n) = (0u32, 0u32, 0usize);
+    for &c in s.iter() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'2'..=b'7' => c - b'2' + 26,
+            _ => return Err(Error::MalformedMessage),
+        } as u32;
+        acc = (acc << 5) | v;
+        bits += 5;
+        if bits >= 8 {
+            bits -= 8;
+            raw[n] = (acc >> bits) as u8;
+            n += 1;
+        }
+    }
+    if raw[0] != VERSION_ACCOUNT && raw[0] != VERSION_CONTRACT {
+        return Err(Error::MalformedMessage);
+    }
+    let expected = u16::from_le_bytes([raw[33], raw[34]]);
+    if crc16_xmodem(&raw[..33]) != expected {
+        return Err(Error::MalformedMessage);
+    }
+    Ok(())
+}
+
+fn crc16_xmodem(data: &[u8]) -> u16 {
+    let mut crc: u16 = 0;
+    for &b in data {
+        crc ^= (b as u16) << 8;
+        for _ in 0..8 {
+            crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x1021 } else { crc << 1 };
+        }
+    }
+    crc
 }
 
 /// Bounds-checked slice: a short message is an error, never a host panic.
